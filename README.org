@@ -1,0 +1,46 @@
+#+TITLE: Claudettes
+
+A collection of AI skills and prompts, mostly for security research: source code
+review, web and API testing, mobile and desktop applications, reverse
+engineering, Active Directory exploitation, reporting and more.
+
+*This has, of course, been heavily generated with AI.*
+
+Every skill is prefixed with =skw-= to make them easier to distinguish from
+other project-local or globally installed skills.
+
+#+begin_example
+claudettes/
+|-- README.org
+`-- sec-skills/
+    |-- skw-auditing-code-for-vulnerabilities/
+    |   |-- SKILL.md
+    |   `-- references/
+    |-- skw-testing-web-applications/
+    |   `-- SKILL.md
+    `-- ...
+#+end_example
+
+Assuming the collection lives at =~/tools/claudettes=, run this from the root of
+each target project:
+
+#+begin_src bash
+mkdir -p .agents/skills && cp -r ~/tools/claudettes/sec-skills/skw-* .agents/skills/ && ln -sf .agents .claude
+#+end_src
+
+The =skw-*= glob leaves any other project-local skills untouched. Re-running the
+=cp= refreshes them or adds new ones. Then start a fresh session with =claude=
+or =codex= and use "/skills" to list them.
+
+An example invocation could be as follows:
+
+#+begin_src bash
+# Switch to your project directory
+cd ~/projects/security_analysis_example
+# Copy relevant skills
+mkdir -p .agents/skills && cp -r ~/tools/claudettes/sec-skills/* .agents/skills && ln -sf .agents .claude
+# Edit target.org to add specific, target-related instructions
+emacs target.org
+# Run the analysis
+claude --permission-mode auto "$(cat ~/tools/claudettes/prompts/SCA.org ~/tools/claudettes/prompts/TOOLING.org ./target.org)"
+#+end_src

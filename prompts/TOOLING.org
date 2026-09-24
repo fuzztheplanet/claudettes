@@ -1,0 +1,32 @@
+#+TITLE: Local tooling
+#+OPTIONS: toc:nil num:nil
+
+This file says how tools are available on this host. The skills and the
+methodology (~SCA.org~ / ~BB.org~) decide *which* tools to use and *how*; this
+file only decides *where each one comes from*.
+
+* Order of preference
+
+Use a tool from the first source that has it:
+
+1. *Locally installed tools* on the host system (~$PATH~).
+2. *Custom ~skw/*~ Docker images*, available under
+   ~/home/skw/tools/skw/dockers~ (build with ~make -C /home/skw/tools/skw/dockers
+   <name>~; run with ~docker run --rm -v "$(pwd):/work" -w /work skw/<name> …~).
+   Inspect what each image actually contains and use those tools accordingly —
+   read its ~Dockerfile~ under ~/home/skw/tools/skw/dockers/<name>/~ and the
+   wrappers in ~/home/skw/tools/skw/dockers/aliases.sh~, or list the binaries
+   inside it (e.g. ~docker run --rm --entrypoint sh skw/<name> -c 'ls /usr/local/bin /usr/bin'~).
+3. *Docker* for anything else (a trusted, pinned public image).
+4. *Last resort:* install the tool locally into a scratchpad directory that is
+   deleted afterwards, so the host stays clean.
+
+* Wordlists
+
+Wordlists for enumeration are under ~/home/skw/tools/skw/wordlists~ (mount
+read-only into a container when needed: ~-v /home/skw/tools/skw/wordlists:/wordlists:ro~).
+
+* MCP servers
+
+Use the *Burp MCP* (HTTP/WebSocket testing) and the *Ghidra MCP* (binary
+decompilation) if they are installed.
