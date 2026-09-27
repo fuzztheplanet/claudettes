@@ -1,0 +1,520 @@
+Follow these instructions (in org-mode format):
+
+#+TITLE: Automated Jazzer Fuzzing Research
+
+* Goal
+
+Take as input a list of GitHub repositories containing Java/Kotlin projects and perform automated vulnerability research using Jazzer.
+
+For every project:
+
+1. clone and build it,
+2. analyze its source code,
+3. identify promising Jazzer fuzzing entry points,
+4. generate multiple fuzz harnesses,
+5. compile and validate the harnesses,
+6. run short fuzzing experiments,
+7. compare harness effectiveness,
+8. improve promising harnesses,
+9. run longer fuzzing campaigns,
+10. analyze crashes and interesting behavior,
+11. report all results.
+
+The objective is to discover previously unknown security vulnerabilities through coverage-guided JVM fuzzing.
+
+Do the work yourself. Do not merely describe commands that could be run.
+
+* Input
+
+The input is a file containing GitHub repository URLs, one per line.
+
+Example:
+
+#+begin_example
+https://github.com/example/project1
+https://github.com/example/project2
+https://github.com/example/project3
+#+end_example
+
+Ignore blank lines and comments beginning with =#=.
+
+* Research Directory
+
+Create:
+
+#+begin_example
+./jazzer_research_<yyyymmdd>/
+#+end_example
+
+where =<yyyymmdd>= is today's date.
+
+Use:
+
+#+begin_example
+jazzer_research_<yyyymmdd>/
+├── research-journal.org
+├── projects/
+│   ├── project-a/
+│   │   ├── research.org
+│   │   ├── source/
+│   │   ├── fuzz/
+│   │   │   ├── harnesses/
+│   │   │   ├── corpus/
+│   │   │   ├── findings/
+│   │   │   └── logs/
+│   │   └── artifacts/
+│   └── project-b/
+│       └── ...
+└── summary/
+#+end_example
+
+Each project MUST have its own =research.org=.
+
+The central =research-journal.org= must summarize the complete campaign and link to each project's report.
+
+Preserve useful corpora, reproductions, logs, and generated harnesses.
+
+* Source Analysis
+
+For each repository, inspect the source and identify code suitable for Jazzer.
+
+Look especially for:
+
+- parsers
+- decoders
+- serializers/deserializers
+- protocol implementations
+- archive handling
+- cryptographic formats
+- certificate/key/token processing
+- URL/path/hostname processing
+- authentication-related processing
+- expression/template languages
+- structured data processing
+- state machines
+- JNI/JNA interfaces
+
+Trace attacker-controlled or otherwise untrusted data into complex or security-sensitive functionality.
+
+Identify concrete Java/Kotlin classes and methods suitable for fuzzing.
+
+Prefer APIs accepting or constructible from:
+
+- =byte[]=
+- =String=
+- =InputStream=
+- =FuzzedDataProvider=
+- structured objects
+- operation sequences
+
+Do not fuzz APIs merely because they are easy to call. Prioritize security-relevant attack surfaces.
+
+* Harness Generation
+
+Generate multiple competing Jazzer harnesses for promising attack surfaces.
+
+Do not rely on a single AI-selected harness.
+
+Harnesses should explore different:
+
+- APIs
+- parser layers
+- input representations
+- initialization paths
+- semantic properties
+- operation sequences
+
+Compile every harness.
+
+Fix compilation errors when practical.
+
+Discard harnesses that cannot reasonably exercise meaningful code.
+
+Use existing tests, examples, protocol samples, dictionaries, and project resources to seed corpora where useful.
+
+* Semantic Fuzzing
+
+Do not restrict fuzzing to crashes.
+
+Where appropriate implement properties such as:
+
+#+begin_example
+decode(encode(x)) == x
+
+deserialize(serialize(x)) == x
+
+parse(serialize(parse(x))) == parse(x)
+
+normalize(normalize(x)) == normalize(x)
+
+sanitize(sanitize(x)) == sanitize(x)
+#+end_example
+
+Develop security-specific invariants when possible.
+
+Examples:
+
+#+begin_example
+validated paths must remain inside the intended root
+
+validated external URLs must not resolve to forbidden destinations
+
+modified signed content must fail verification
+
+equivalent representations must not cause inconsistent security decisions
+
+serialization must not change security-relevant interpretation
+#+end_example
+
+Use differential fuzzing when another implementation, JDK API, standard test suite, or other reliable oracle exists.
+
+Use appropriate Jazzer bug detectors where relevant.
+
+* Harness Competition
+
+Initially run each valid harness for a short experimental period.
+
+Measure useful signals such as:
+
+- coverage growth
+- executions per second
+- corpus growth
+- unique paths/features
+- stability
+- exceptions
+- timeouts
+- hangs
+- memory consumption
+- sanitizer/bug-detector findings
+
+Use empirical fuzzing results rather than AI intuition to decide which harnesses deserve additional resources.
+
+Discard or deprioritize harnesses that:
+
+- exercise trivial code,
+- produce little useful coverage,
+- repeatedly hit expected exceptions,
+- are extremely slow without corresponding value,
+- duplicate better harnesses.
+
+Keep promising harnesses.
+
+* Harness Improvement
+
+Analyze coverage and corpus behavior from the short experiments.
+
+For promising harnesses, attempt improvements such as:
+
+- better input construction
+- dictionaries
+- seed corpora
+- deeper API entry points
+- bypassing irrelevant validation layers
+- structured =FuzzedDataProvider= inputs
+- exercising additional states
+- combining related APIs
+- adding semantic oracles
+- adding differential oracles
+
+Re-run improved harnesses and compare them with previous versions.
+
+Do not assume that generated changes are improvements. Measure them.
+
+* Extended Fuzzing
+
+Run longer fuzzing campaigns for the most promising harnesses.
+
+Allocate more resources to harnesses demonstrating:
+
+- meaningful coverage,
+- good execution speed,
+- continued corpus evolution,
+- security-sensitive reachability,
+- useful semantic properties,
+- unusual behavior.
+
+Avoid wasting substantial time on clearly unproductive harnesses.
+
+* Finding Analysis
+
+For every crash, bug-detector finding, invariant violation, timeout, or unusual behavior:
+
+1. reproduce it,
+2. minimize the triggering input where possible,
+3. inspect the relevant source code,
+4. determine the probable root cause,
+5. distinguish expected behavior from bugs,
+6. determine potential security relevance,
+7. check whether equivalent findings already exist,
+8. preserve the reproducer.
+
+Do NOT automatically classify a Jazzer crash as a vulnerability.
+
+Use classifications such as:
+
+#+begin_example
+CONFIRMED SECURITY ISSUE
+PROBABLE SECURITY ISSUE
+FUNCTIONAL BUG
+DENIAL-OF-SERVICE CANDIDATE
+EXPECTED BEHAVIOR
+DUPLICATE
+FALSE POSITIVE
+UNKNOWN
+#+end_example
+
+Only use =CONFIRMED SECURITY ISSUE= when the available evidence supports that conclusion.
+
+* Per-Project Report
+
+Maintain:
+
+#+begin_example
+projects/<project>/research.org
+#+end_example
+
+during the investigation rather than generating it only at the end.
+
+Use approximately:
+
+#+begin_example
+#+TITLE: Jazzer Research — PROJECT
+
+* Project
+
+Repository:
+Revision:
+Date:
+
+* Attack Surface
+
+Relevant APIs and security boundaries discovered.
+
+* Harnesses
+
+** Harness: NAME
+
+Target:
+Strategy:
+Oracle:
+Corpus:
+Dictionary:
+
+*** Initial Results
+
+Runtime:
+Executions:
+Coverage:
+Corpus growth:
+Findings:
+
+*** Improvements
+
+Changes made and whether they improved results.
+
+*** Final Results
+
+Final fuzzing statistics and observations.
+
+* Findings
+
+** Finding 1
+
+Classification:
+Harness:
+Reproducer:
+Affected code:
+
+*** Behavior
+
+What happened.
+
+*** Root Cause
+
+Source-level explanation.
+
+*** Security Relevance
+
+Evidence-based assessment.
+
+*** Reproduction
+
+How the finding can be reproduced locally.
+
+* Coverage and Limitations
+
+Important areas reached and areas that remained difficult to exercise.
+
+* Conclusions
+
+Summarize what was learned about this project and which harnesses deserve further fuzzing.
+#+end_example
+
+Record useful negative results as well.
+
+A failed hypothesis or ineffective harness is valuable research information.
+
+* Research Journal
+
+Maintain:
+
+#+begin_example
+./jazzer_research_<yyyymmdd>/research-journal.org
+#+end_example
+
+throughout the complete campaign.
+
+The journal should contain:
+
+#+begin_example
+#+TITLE: Jazzer Research Journal
+#+DATE: DATE
+
+* Campaign Summary
+
+Repositories analyzed:
+Harnesses generated:
+Harnesses successfully executed:
+Total fuzzing time:
+Interesting findings:
+Confirmed security issues:
+
+* Project Status
+
+| Project | Harnesses | Fuzz Time | Findings | Best Harness | Status |
+|---------+-----------+-----------+----------+--------------+--------|
+
+* Findings
+
+Summarize significant findings across all projects and link to their detailed project reports.
+
+* Interesting Harnesses
+
+Record particularly effective fuzzing strategies that may be reusable against other projects.
+
+* Failed Approaches
+
+Record approaches that repeatedly produced poor results.
+
+* Cross-Project Observations
+
+Record recurring bug patterns, useful Jazzer techniques, parser designs, security assumptions, and fuzzing strategies discovered during the campaign.
+
+* Future Work
+
+Record promising experiments that could not be completed during this run.
+
+* Research Log
+
+Maintain chronological notes describing significant actions, decisions, discoveries, failures, and changes in research direction.
+#+end_example
+
+Update this journal while working.
+
+Do not reconstruct the entire research process from memory only at the end.
+
+* Reproducibility
+
+Record for each project:
+
+- repository URL
+- exact Git revision
+- build commands
+- Java version
+- Jazzer version
+- relevant dependencies
+- harness source
+- important Jazzer options
+- dictionaries
+- seed corpora
+- fuzzing duration
+- reproducer inputs
+
+Another researcher should be able to reproduce significant results.
+
+* Resource Management
+
+Use available compute intelligently.
+
+Prefer:
+
+#+begin_example
+many cheap harness experiments
+        ↓
+empirical selection
+        ↓
+harness improvement
+        ↓
+fewer longer campaigns
+#+end_example
+
+over immediately running every generated harness for a long period.
+
+Do not allow one broken or difficult project to prevent analysis of the remaining repositories.
+
+Record failures and continue.
+
+* Rules
+
+- Actually execute the research and fuzzing.
+- Only use repositories supplied in the input list.
+- Focus specifically on Jazzer-compatible Java/Kotlin attack surfaces.
+- Inspect actual source code before generating harnesses.
+- Generate multiple harnesses where multiple meaningful attack surfaces exist.
+- Compile and execute generated harnesses.
+- Let measured fuzzing performance influence harness selection.
+- Preserve useful corpora and reproducers.
+- Investigate crashes rather than merely reporting stack traces.
+- Never fabricate fuzzing results, coverage, execution counts, or findings.
+- Clearly distinguish vulnerabilities from ordinary bugs and expected exceptions.
+- Record negative results and failed experiments.
+- Keep each project's research isolated in its own directory.
+- Maintain the central =research-journal.org= throughout the campaign.
+- Do not ask for confirmation between projects or research stages.
+- If one project fails to build or fuzz, document the problem and continue with the others.
+- Prefer reproducible evidence over speculative AI conclusions.
+- Continue until every supplied repository has been analyzed and all worthwhile Jazzer experiments that are practical within the available resources have been performed.
+
+The fundamental workflow is:
+
+#+begin_example
+repository
+    |
+    v
+source analysis
+    |
+    v
+identify Jazzer entry points
+    |
+    v
+generate competing harnesses
+    |
+    v
+compile + validate
+    |
+    v
+short fuzzing experiments
+    |
+    v
+measure coverage/performance
+    |
+    v
+select + improve harnesses
+    |
+    v
+extended fuzzing
+    |
+    v
+reproduce + minimize findings
+    |
+    v
+source-level root-cause analysis
+    |
+    v
+project research.org
+    |
+    v
+research-journal.org
+#+end_example
+
+Use this loop iteratively: fuzzing results should inform further source analysis, and source analysis should inform subsequent harness generation.

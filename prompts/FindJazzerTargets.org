@@ -1,0 +1,208 @@
+Follow these instructions (in org-mode format):
+
+#+TITLE: Jazzer Target Discovery
+
+* Goal
+
+Discover open-source Java/Kotlin projects that are promising targets for finding previously unknown vulnerabilities specifically through Jazzer fuzzing.
+
+Only report projects that are genuinely interesting to fuzz with Jazzer.
+
+Do NOT report projects merely because they are interesting for manual security research, CodeQL, Semgrep, native fuzzers, or other techniques.
+
+Perform the research yourself. Inspect actual repositories and source code rather than relying only on project descriptions.
+
+* Target Selection
+
+Prefer Java/Kotlin projects containing security-relevant code that accepts attacker-controlled or otherwise untrusted input.
+
+Particularly interesting examples include:
+
+- network protocol parsers
+- binary and text parsers
+- serialization/deserialization
+- cryptographic protocols and formats
+- authentication/token processing
+- URL/path/hostname processing
+- archive and document formats
+- expression/template languages
+- stateful protocol implementations
+- Java APIs exposing native parsers through JNI/JNA
+
+A strong target should combine several of:
+
+#+begin_example
+untrusted input
++ complex processing
++ security relevance
++ practical Jazzer entry point
++ weak existing fuzzing
++ useful fuzzing oracle
+#+end_example
+
+Reject projects that do not have a realistic and useful Jazzer fuzzing entry point.
+
+Avoid intentionally vulnerable applications, CTFs, toy projects, malware, and abandoned proof-of-concepts.
+
+* Discovery
+
+Search GitHub, Maven Central, OSS-Fuzz, security advisories, project documentation, source code, and other relevant public sources.
+
+Report as many targets as you deem relevant. Do not aim for an arbitrary number and do not include weak targets merely to make the list longer.
+
+For each candidate investigate:
+
+- attacker-controlled input
+- concrete Java/Kotlin APIs suitable for Jazzer
+- parser/protocol complexity
+- security relevance
+- existing Jazzer/fuzzing/OSS-Fuzz coverage
+- previous security issues
+- ease of constructing a Jazzer harness
+- semantic fuzzing properties/oracles
+- differential-testing opportunities
+- project activity and downstream usage
+
+Explicitly search for existing fuzzing before selecting a project.
+
+* Ranking
+
+Rank projects according to how attractive they are specifically as Jazzer targets.
+
+Score each criterion from 0-4:
+
+| Criterion | Weight |
+|-----------+--------|
+| Attacker-controlled input | 4 |
+| Complexity reachable by Jazzer | 4 |
+| Security impact | 5 |
+| Lack of existing fuzzing | 5 |
+| Jazzer harness feasibility | 5 |
+| Semantic fuzzing potential | 4 |
+| Differential-testing potential | 3 |
+| Downstream exposure | 3 |
+| Research saturation | -4 |
+| Novelty | 3 |
+
+Calculate:
+
+#+begin_example
+score =
+(input * 4)
++ (complexity * 4)
++ (impact * 5)
++ (lack_of_fuzzing * 5)
++ (jazzer_feasibility * 5)
++ (semantic * 4)
++ (differential * 3)
++ (downstream * 3)
+- (saturation * 4)
++ (novelty * 3)
+#+end_example
+
+Do not include a project in the final results if its interesting attack surface cannot realistically be reached and exercised with Jazzer.
+
+* Output
+
+Create:
+
+#+begin_example
+./jazzer_targets_<yyyymmdd>/
+#+end_example
+
+where =<yyyymmdd>= is today's date.
+
+Create:
+
+#+begin_example
+./jazzer_targets_<yyyymmdd>/targets.org
+./jazzer_targets_<yyyymmdd>/targets.txt
+#+end_example
+
+* targets.org
+
+Write a concise Org-mode research report.
+
+Start with:
+
+#+begin_example
+| Rank | Project | Score | Jazzer Entry Point | Main Opportunity |
+#+end_example
+
+For every target include:
+
+** PROJECT NAME
+
+*** Repository
+
+Canonical GitHub URL.
+
+*** Why Jazzer?
+
+Explain specifically why coverage-guided JVM fuzzing is appropriate for this project.
+
+*** Jazzer Entry Points
+
+Identify concrete Java/Kotlin classes and methods that could be fuzzed.
+
+Prefer entry points accepting:
+
+- =byte[]=
+- =String=
+- =InputStream=
+- structured values constructible through =FuzzedDataProvider=
+
+*** Fuzzing Strategy
+
+Describe the most promising Jazzer harness.
+
+Include useful invariants, semantic oracles, differential-testing opportunities, and relevant Jazzer bug detectors where applicable.
+
+*** Existing Fuzzing
+
+Describe existing Jazzer, OSS-Fuzz, property-testing, or other fuzzing infrastructure found.
+
+*** First Experiment
+
+Describe one concrete Jazzer harness that could be implemented immediately.
+
+*** Score
+
+Show the scoring breakdown and final score.
+
+*** Confidence
+
+HIGH, MEDIUM, or LOW.
+
+* Repository List
+
+Create =targets.txt= containing ONLY canonical GitHub repository URLs ordered from the most promising Jazzer target to the least promising.
+
+Example:
+
+#+begin_example
+https://github.com/example/project1
+https://github.com/example/project2
+https://github.com/example/project3
+#+end_example
+
+No numbering, scores, comments, or other text may appear in =targets.txt=.
+
+* Rules
+
+- ONLY report projects that are interesting to fuzz with Jazzer.
+- Every reported project must have at least one concrete Jazzer entry point.
+- Prefer code reachable directly from Java/Kotlin.
+- Prefer attacker-controlled inputs reaching complex security-sensitive behavior.
+- Prefer targets with weak or absent existing fuzzing.
+- Prefer targets with semantic or differential-testing opportunities.
+- Verify repository URLs.
+- Inspect actual source code.
+- Explicitly investigate existing fuzzing.
+- Do not fabricate evidence.
+- Mark uncertainty clearly.
+- Report as many targets as you deem relevant.
+- Do not include weak candidates merely to increase the result count.
+- Do not ask for confirmation during research.
+- Actually create the output directory and both files.
+- Ensure =targets.txt= exactly follows the ranking in =targets.org=.
