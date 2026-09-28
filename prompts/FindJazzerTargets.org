@@ -6,6 +6,13 @@ Follow these instructions (in org-mode format):
 
 Discover open-source Java/Kotlin projects that are promising targets for finding previously unknown vulnerabilities specifically through Jazzer fuzzing.
 
+Aim for a *broad* set — around 40-50 strong targets — by casting a wide net across
+many sources, then filtering hard by the quality bar below. Select and rank purely
+by how likely a project is to contain a security issue that Jazzer could find; the
+set does not need to be diverse. Breadth is a goal, but never a reason to lower the
+bar: a genuinely-qualifying set of 35 beats a padded list of 50. Only fall short of
+~50 if the qualifying pool is truly exhausted.
+
 Only report projects that are genuinely interesting to fuzz with Jazzer.
 
 Do NOT report projects merely because they are interesting for manual security research, CodeQL, Semgrep, native fuzzers, or other techniques.
@@ -46,9 +53,45 @@ Avoid intentionally vulnerable applications, CTFs, toy projects, malware, and ab
 
 * Discovery
 
-Search GitHub, Maven Central, OSS-Fuzz, security advisories, project documentation, source code, and other relevant public sources.
+Search broadly and systematically. To reach ~50 qualifying targets you must sweep
+several sources, not just one, and let discovery run wide before filtering. Only
+include targets that clear the quality bar; never pad with projects that lack a
+concrete Jazzer entry point.
 
-Report as many targets as you deem relevant. Do not aim for an arbitrary number and do not include weak targets merely to make the list longer.
+Sources to sweep (use several):
+
+- *GitHub code/topic search* — topics =parser=, =serialization=, =protocol=, =jvm=,
+  =java-library=; and method-signature searches like =parse(byte[])=,
+  =readFrom(InputStream)=, =decode(String)=, =fromJson=, =deserialize=, =unmarshal=.
+- *Maven Central / popular-artifact rankings* — widely-depended-on parsing/format
+  libraries with large downstream blast radius.
+- *OSS-Fuzz project list* — mine it *both ways*: as a seed of fuzzable Java projects,
+  and to find libraries NOT yet integrated (weak/absent existing fuzzing is a win).
+- *Security advisories & CVE history* (GHSA, NVD) for Java/Kotlin parsers,
+  deserializers, and format handlers — recurring-CVE libraries are strong signals.
+- *Ecosystem families with heavy parsing surface* — Apache Commons/Tika/POI/PDFBox,
+  Netty and protocol stacks, JSON/YAML/XML/CBOR/protobuf/ASN.1 libraries,
+  image/media/document/archive decoders, JOSE/JWT/crypto libraries, template/
+  expression engines, and Android/AOSP libraries with Java entry points.
+- *Awesome-lists, research/conference references, and downstream dependents.*
+
+These categories tend to be the most fruitful Jazzer targets — use them as search
+leads to widen the candidate pool, not as quotas to balance:
+
+- Text/binary format parsers (JSON/XML/YAML/CBOR/protobuf/ASN.1)
+- Document/media/archive/image decoders (PDF/office/zip/tar/png)
+- Network & wire protocols (HTTP/2, WebSocket, MQTT, DNS, TLS records)
+- Serialization/deserialization frameworks
+- Crypto / JOSE / JWT / certificate & token processing
+- Expression/template/query languages (EL, SpEL, JEXL, CEL, JSONPath)
+- URL/path/hostname/charset/encoding handling
+- JNI/JNA wrappers exposing native parsers
+
+Do not balance the set across categories and do not drop near-duplicates for
+variety. Select and rank *strictly* by how likely each project is to contain a
+security issue that Jazzer could find. If the strongest 50 targets are all format
+parsers, report all 50 — likelihood of a Jazzer-findable bug is the only thing that
+decides inclusion and order.
 
 For each candidate investigate:
 
@@ -123,13 +166,24 @@ Create:
 
 Write a concise Org-mode research report.
 
-Start with:
+Start with a single summary table ranking *all* targets (both tiers) by score:
 
 #+begin_example
-| Rank | Project | Score | Jazzer Entry Point | Main Opportunity |
+| Rank | Project | Score | Tier | Jazzer Entry Point | Main Opportunity |
 #+end_example
 
-For every target include:
+Because the set is large, present it in two tiers so depth goes where it matters:
+
+- *Tier 1 — deep dives (top ~15-20):* the full per-target template below.
+- *Tier 2 — concise entries (remainder, down to ~50):* the compact template
+  further below. Tier 2 is *shorter, not weaker* — it still requires a verified
+  repository URL, a concrete Jazzer entry point, and a checked existing-fuzzing
+  status.
+
+Promote a Tier-2 target to Tier 1 if its score lands in the top group. Rank the
+summary table and =targets.txt= across both tiers by score.
+
+For every *Tier 1* target include the full template:
 
 ** PROJECT NAME
 
@@ -174,6 +228,20 @@ Show the scoring breakdown and final score.
 
 HIGH, MEDIUM, or LOW.
 
+For every *Tier 2* target, use this compact block instead (one per target):
+
+#+begin_example
+** PROJECT NAME  —  score N  (confidence: HIGH/MEDIUM/LOW)
+- Repo: <verified canonical GitHub URL>
+- Entry point: <Class#method(inputType)> — the concrete thing Jazzer would call
+- Why Jazzer / main opportunity: <one or two lines>
+- Existing fuzzing: <none / OSS-Fuzz / property tests / harness found — with link>
+- Score: <breakdown or total>
+#+end_example
+
+Tier-2 entries must still satisfy every quality rule below; they are condensed for
+volume, not exempted from evidence.
+
 * Repository List
 
 Create =targets.txt= containing ONLY canonical GitHub repository URLs ordered from the most promising Jazzer target to the least promising.
@@ -201,8 +269,15 @@ No numbering, scores, comments, or other text may appear in =targets.txt=.
 - Explicitly investigate existing fuzzing.
 - Do not fabricate evidence.
 - Mark uncertainty clearly.
-- Report as many targets as you deem relevant.
-- Do not include weak candidates merely to increase the result count.
+- Aim for a broad set (~40-50) of qualifying targets; keep expanding discovery
+  until you have that many that clear the bar, or the qualifying pool is exhausted.
+- Never include a candidate lacking a concrete Jazzer entry point or a verified repo
+  just to hit the count — a shorter honest list beats a padded one.
+- Select and rank *strictly* by likelihood of a Jazzer-findable security issue; the
+  set need not be diverse — do not spread across categories or drop near-duplicates
+  for variety.
+- Tier 2 entries are condensed, not lower-quality: verified repo + real entry point
+  + checked existing-fuzzing status are mandatory for every target.
 - Do not ask for confirmation during research.
 - Actually create the output directory and both files.
 - Ensure =targets.txt= exactly follows the ranking in =targets.org=.

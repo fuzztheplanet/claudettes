@@ -204,41 +204,46 @@ Fix the target and the budget before you start, and record both in
   one(s) in scope (all of them when the engagement says so), and analyse each as
   its own target with its own attack-surface map — do not silently collapse them
   into one, and do not silently drop the others.
-- *Effort budget.* "Report all of them" is bounded by a risk order, not by reading
-  everything to the same depth. Rank the attack surfaces from phase 1 by exposure
-  — unauthenticated and internet-facing first, then authenticated low-privilege,
-  then internal / insider — and spend the deepest effort on the riskiest surfaces
-  first. On a large codebase this is the difference between "deepest on what an
-  external attacker can reach" and an unterminating shallow-everywhere sweep.
-  Exposure is not the only axis: overlay two *density* signals that predict where
-  true positives cluster, and raise a surface's priority where they coincide with
-  exposure. *Follow the money* — billing, refunds, coupons, wallets, credit, quota
-  and metering logic are where developers take the most shortcuts, so value-bearing
-  flows earn deep effort even when they sit behind authentication. *New is
-  unreviewed* — code shipped most recently has the lowest security maturity; wire
-  the recently-changed / newly-added inventory from the phase-1 history mining
-  directly into this ranking as a deep-dive priority, not merely as a recon
-  artefact. The deepest effort goes where high exposure, high value and low maturity
-  overlap. Still reserve a minimum review quota for every critical trust boundary
-  and old security-sensitive subsystem: mature-looking authentication,
-  serialization and tenant-isolation code can contain long-lived vulnerabilities.
+
+- *Effort budget.* "Report all of them" is bounded by a risk order, not by
+  reading everything to the same depth. Rank the attack surfaces from phase 1 by
+  exposure — unauthenticated and internet-facing first, then authenticated
+  low-privilege, then internal / insider — and spend the deepest effort on the
+  riskiest surfaces first. On a large codebase this is the difference between
+  "deepest on what an external attacker can reach" and an unterminating
+  shallow-everywhere sweep. Exposure is not the only axis: overlay two *density*
+  signals that predict where true positives cluster, and raise a surface's
+  priority where they coincide with exposure. *Follow the money* — billing,
+  refunds, coupons, wallets, credit, quota and metering logic are where
+  developers take the most shortcuts, so value-bearing flows earn deep effort
+  even when they sit behind authentication. *New is unreviewed* — code shipped
+  most recently has the lowest security maturity; wire the recently-changed /
+  newly-added inventory from the phase-1 history mining directly into this
+  ranking as a deep-dive priority, not merely as a recon artefact. The deepest
+  effort goes where high exposure, high value and low maturity overlap. Still
+  reserve a minimum review quota for every critical trust boundary and old
+  security-sensitive subsystem: mature-looking authentication, serialization and
+  tenant-isolation code can contain long-lived vulnerabilities.
+
 - *Stop condition.* Declare, up front, what "done" means for this run (which
-  surfaces to what depth, and a time or iteration ceiling), and record when it is
-  reached, so the run terminates deliberately rather than by exhaustion. Anything
-  the budget forced you to leave shallow is listed in the phase-4 coverage gate,
-  not left unsaid.
-- *Budget ledger.* Keep a lightweight per-surface ledger — effort spent versus the
-  ceiling you set — and update it as you go, so allocation stays deliberate rather
-  than opportunistic. When a scan or a deep-dive is over-running its allotment with
-  only marginal return, cut it and reallocate the remaining budget to a higher-risk
-  surface you have not yet exercised. The ledger is what tells you, mid-run, to stop
-  polishing one surface and go test an untouched one. Track effort through distinct
-  probes or traced paths, coverage reached, parser/state transitions exercised and
-  new signal returned, not wall-clock alone. Never declare a surface saturated from
-  an arbitrary probe count. Use diminishing returns together with remaining untested
-  parameter classes, roles, object relationships, code coverage and trust
-  boundaries. Cap a single unproductive path, but preserve its unresolved question
-  in the coverage ledger.
+  surfaces to what depth, and a time or iteration ceiling), and record when it
+  is reached, so the run terminates deliberately rather than by exhaustion.
+  Anything the budget forced you to leave shallow is listed in the phase-4
+  coverage gate, not left unsaid.
+
+- *Budget ledger.* Keep a lightweight per-surface ledger — effort spent versus
+  the ceiling you set — and update it as you go, so allocation stays deliberate
+  rather than opportunistic. When a scan or a deep-dive is over-running its
+  allotment with only marginal return, cut it and reallocate the remaining
+  budget to a higher-risk surface you have not yet exercised. The ledger is what
+  tells you, mid-run, to stop polishing one surface and go test an untouched
+  one. Track effort through distinct probes or traced paths, coverage reached,
+  parser/state transitions exercised and new signal returned, not wall-clock
+  alone. Never declare a surface saturated from an arbitrary probe count. Use
+  diminishing returns together with remaining untested parameter classes, roles,
+  object relationships, code coverage and trust boundaries. Cap a single
+  unproductive path, but preserve its unresolved question in the coverage
+  ledger.
 
 ** Preflight: probe the environment before phase 1
 

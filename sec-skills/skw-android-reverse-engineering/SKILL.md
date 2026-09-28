@@ -1,16 +1,64 @@
 ---
 name: skw-android-reverse-engineering
-description: Decompile Android APK, XAPK, AAB, DEX, JAR, and AAR files using jadx or Fernflower/Vineflower. Reverse engineer Android apps, extract HTTP API endpoints (Retrofit, OkHttp, Volley, GraphQL, WebSocket), trace call flows from UI to network layer, analyze security patterns (cert pinning, exposed secrets, Android Fragment Injection via exported PreferenceActivity), perform dynamic analysis with Frida (adaptive bypass generation, crash analysis, runtime hooking), and — only when the decompiled app contains Google API keys or Firebase configuration — run a conditional Firebase & Google API testing phase (Auth, Realtime DB, Firestore, Remote Config, Storage, Dynamic Links, FCM, Gemini, Maps). Use when the user wants to decompile, analyze, or reverse engineer Android packages, find API endpoints, follow call flows, audit app security, bypass runtime protections, test exposed Google/Firebase credentials, or check for Fragment Injection exposure.
+description: Decompile Android APK, XAPK, AAB, DEX, JAR, and AAR files using jadx or Fernflower/Vineflower. Reverse engineer Android apps, extract HTTP API endpoints (Retrofit, OkHttp, Volley, GraphQL, WebSocket), trace call flows from UI to network layer, analyze security patterns (cert pinning, exposed secrets, Android Fragment Injection via exported PreferenceActivity), perform dynamic analysis with Frida (adaptive bypass generation, crash analysis, runtime hooking), and — only when the decompiled app contains Google API keys or Firebase configuration — run a conditional Firebase & Google API testing phase (Auth, Realtime DB, Firestore, Remote Config, Storage, Dynamic Links, FCM, Gemini, Maps). Use when the user wants to decompile, analyze, or reverse engineer Android packages, find API endpoints, follow call flows, audit app security, bypass runtime protections, test exposed Google/Firebase credentials, check for Fragment Injection exposure, identify packers and app runtimes (Flutter, React Native, Unity/IL2CPP, Xamarin, Cordova), analyze native .so/JNI libraries, decode protobuf/gRPC traffic, merge split APKs, or patch, repack, and re-sign an APK on authorized targets.
 ---
 
 # Android Reverse Engineering
 
 Decompile Android APK, XAPK, AAB, DEX, JAR, and AAR files using jadx and Fernflower/Vineflower, trace call flows through application code and libraries, analyze security patterns, produce structured documentation of extracted APIs, and perform adaptive dynamic analysis with Frida — generating custom bypass scripts based on what the static analysis finds, iterating through crash logs to refine hooks until protections are bypassed. Two decompiler engines are supported — jadx for broad Android coverage and Fernflower for higher-quality output on complex Java code — and can be used together for comparison.
 
+## Operating rules
+
+Read these before starting. They override default reasoning until evidence proves otherwise.
+
+**Evidence and claim strength.** Every statement this skill emits carries a claim-strength label — OBSERVED, MEASURED, INFERRED, or UNVERIFIED. A grep or tool hit is a *lead*, not a finding, until you read the code or observe the behavior. Never state a claim stronger than its evidence; "vulnerable" and "bypassed" require OBSERVED or MEASURED proof. See `<skill-directory>/references/verification.md` for the ladder and the rules.
+
+**Decision gates.** Phases are gated. Before moving on, confirm the phase's pass criterion actually holds — e.g. decompilation produced real Java (not an empty tree from a packed app or a non-Java runtime), the app actually runs before you credit a bypass, a patch actually landed. A failed gate routes you to the triage gate (Phase 2.5) or a reference, not forward.
+
+**Symptom index — stop signals.** When you hit a failure mode (empty decompile, immediate exit, `SIGABRT`, frida can't connect, repack won't install, binary response bodies, …), match it in `<skill-directory>/references/troubleshooting-index.md` and load what it points to *before* continuing.
+
+**Two-strike rule.** If the same action fails twice with the same error, the approach is wrong — do not retry a third time with tweaked parameters. Re-read the evidence, consult the symptom index, and change tool or layer (Java ↔ native ↔ server; static ↔ dump ↔ dynamic).
+
+**Definition of done.** "Scripts ran cleanly" is not done. A task is complete only when every hit is confirmed by reading code, every endpoint traced to an entry point, every bypass reproduced from a clean start, every finding labeled with its strength, every modification proven landed and the app verified to still run, output desensitized, and negatives stated. The full checklist is in `<skill-directory>/references/verification.md`.
+
+**Authorized use only.** This skill operates on apps you own, targets you are contracted or permitted to test, public CTF material, or controlled sandboxes. Confirm scope before any modification (patch/repack), device action, or credential probe.
+
 ## Project-local path portability
 
 Before running a command, resolve `<skill-directory>` to the absolute directory containing this
 `SKILL.md`. Never pass the literal placeholder to the shell.
+
+## Operating rules
+
+These govern every phase. They exist to stop confident, unverified conclusions —
+the main failure mode of automated reverse engineering.
+
+- **Evidence & claim strength.** Label every finding with a strength —
+  `OBSERVED`, `MEASURED`, `INFERRED`, or `UNVERIFIED` — and never state one
+  higher than the evidence supports. A grep/tool hit is a *lead*, not a finding,
+  until you read the code behind it. "Vulnerable" and "bypassed" require
+  `OBSERVED`/`MEASURED` proof. See `<skill-directory>/references/verification.md`
+  for the full ladder. (In a bug-bounty context, theoretical "could allow…"
+  impact is `UNVERIFIED` and must not be written as a finding.)
+
+- **Decision gates.** Several phases below are **gates**: they have an explicit
+  pass criterion, and a fail routes you elsewhere before you waste effort. Do not
+  push past a gate on assumption — e.g. do not analyze "empty" jadx output as if
+  the app had no logic before the Phase 2.5 triage gate has ruled out packing and
+  non-Java runtimes.
+
+- **Symptom index / two-strike rule.** When something fails or looks wrong, check
+  `<skill-directory>/references/troubleshooting-index.md` — a matching symptom row
+  is a stop signal to load the referenced material. If the **same action fails
+  twice with the same error, stop**: the hypothesis is wrong. Change approach
+  (tool, layer, or technique), not parameters. A third identical retry is wasted.
+
+- **Definition of done.** "Scripts ran cleanly" is not done. A task is done only
+  when every hit is confirmed, every endpoint is traced, every bypass is
+  reproduced from a clean start, every finding is labeled with its strength and
+  evidence, every modification is proven landed **and** launch-verified, output is
+  desensitized, and checked-and-clean negatives are stated — not just positives.
+  The full checklist is in `<skill-directory>/references/verification.md`.
 
 ## Prerequisites
 
@@ -55,6 +103,21 @@ After installation, re-run `check-deps.sh` to confirm everything is in place. Do
 
 ### Phase 2: Decompile
 
+**Split-APK sets first.** If the target is an installed app or a split set
+(`base.apk` + `split_config.*.apk` / feature splits), or an `.apks`/`.apkm`
+archive, merge it into one APK before decompiling — decompiling only `base.apk`
+misses code that lives in feature splits.
+
+```bash
+# From a directory of splits, an .apks/.xapk archive, or a connected device
+bash <skill-directory>/scripts/merge-splits.sh <dir|archive>
+bash <skill-directory>/scripts/merge-splits.sh --device -p <package>
+```
+
+Read `MERGE_RESULT`: `success` (decompile `MERGED_APK`), `not-needed` (only
+config splits — `base.apk` alone is fine for code analysis), or `failed`. `.xapk`
+bundles are also handled directly by `decompile.sh`.
+
 Use the decompile wrapper script to process the target file. The script supports three engines: `jadx`, `fernflower`, and `both`.
 
 **Action**: Choose the engine and run the decompile script. The script handles APK, XAPK, AAB, DEX, JAR, and AAR files.
@@ -91,6 +154,41 @@ When using `--engine both`, the outputs go into `<output>/jadx/` and `<output>/f
 For APK files with Fernflower, the script automatically uses dex2jar as an intermediate step. dex2jar must be installed for this to work.
 
 See `<skill-directory>/references/jadx-usage.md` and `<skill-directory>/references/fernflower-usage.md` for the full CLI references.
+
+### Phase 2.5: Target Triage Gate (runtime + packer)
+
+**This is a gate.** Before analyzing the decompiled output as normal Java/Kotlin,
+confirm it actually *is*. Two conditions make jadx output empty or misleading — a
+non-JVM runtime and a packer — and both reroute you. Check them now.
+
+**Runtime check** — where does the app's logic actually live?
+
+```bash
+bash <skill-directory>/scripts/detect-runtime.sh <apk-or-output-dir> --report <output>/runtime.md
+```
+
+- Exit 2 / `RUNTIME_DETECTED=native-java` → normal flow, continue to Phase 3.
+- Exit 0 with `RUNTIME_DETECTED=flutter|react-native|unity-il2cpp|unity-mono|xamarin|cordova`
+  → the Dex holds little logic. Follow the emitted `RUNTIME_TOOL` and switch
+  toolchains per `<skill-directory>/references/framework-runtimes.md` (e.g. blutter
+  for Flutter, Il2CppDumper for Unity, the JS bundle for React Native) **before**
+  spending time in the decompiled Java.
+
+**Packer check** — is the real Dex encrypted/hidden behind a loader?
+
+```bash
+bash <skill-directory>/scripts/detect-packer.sh <apk-or-output-dir> --report <output>/packer.md
+```
+
+- Exit 2 / `PACKER_DETECTED=none` → continue.
+- Exit 0 with `PACKER_DETECTED=<family>` → the decompiled classes are likely a
+  stub loader, not the app. Recover the real Dex first (let the app decrypt itself
+  and dump from memory) per `<skill-directory>/references/packers.md`, repair the
+  dumped Dex header (`dex-byte-patch.py --verify`), then re-run this gate and
+  Phase 2 on the recovered Dex.
+
+Detection is signature/heuristic based, so a clean result is `INFERRED`, not proof
+of "no packer / plain runtime" — label it that way (`references/verification.md`).
 
 ### Phase 3: Analyze Structure
 
@@ -205,6 +303,20 @@ Then, for each discovered endpoint, read the surrounding source code to extract:
 - **Called from**: `LoginActivity → LoginViewModel → UserRepository → ApiService`
 ```
 
+**Binary / non-HTTP bodies.** If endpoints exist but request/response bodies are
+not readable JSON — or the app clearly does network I/O yet the sweep finds "no
+endpoints" — the transport is likely protobuf, gRPC, or a custom framing. Decode
+captured bodies schema-free:
+
+```bash
+python3 <skill-directory>/scripts/protobuf-decode.py <body.bin>       # or --hex / stdin
+python3 <skill-directory>/scripts/protobuf-decode.py --grpc <frame.bin>
+```
+
+Recover the real schema from the app's generated protobuf classes, and for
+QUIC/HTTP3 (invisible to a proxy MITM) hook the serializer at runtime — see
+`<skill-directory>/references/protocol-reverse.md`.
+
 See `<skill-directory>/references/api-extraction-patterns.md` for library-specific search patterns and the full documentation template.
 
 ### Phase 6: Security Patterns Scan
@@ -225,6 +337,29 @@ Look for and flag:
 - **Network Security Config** — check `res/xml/network_security_config.xml` for `cleartextTrafficPermitted="true"` or overly broad trust anchors
 
 These raw findings feed Phase 8. Targeted vulnerability hunting (e.g. Fragment Injection) and the RASP/anti-tamper synthesis from Phase 7's dynamic analysis happen in Phase 8.
+
+### Phase 6.5: Native Library Analysis
+
+Java/Kotlin analysis stops at the JNI boundary, but RASP, crypto, and string
+protection increasingly live in `.so` code. Triage the native libraries so
+Phase 7 (and any `SIGABRT` / native-crash cases) has a map to work from.
+
+```bash
+bash <skill-directory>/scripts/analyze-native.sh <apk-or-output-dir> --report <output>/native.md
+```
+
+It enumerates `.so` per ABI and emits `SO=`, `NEEDED=`,
+`JNI_EXPORT=<lib>:<Java_symbol>`, `JNI_ONLOAD=`/`REGISTER_NATIVES=`,
+`NATIVE_ANTITAMPER=<lib>:<indicator>` (ptrace, TracerPid, frida/maps scans, native
+signature checks), and `NATIVE_STRING=` leads (URLs, key material).
+
+Key point: **no `Java_*` exports plus a `JNI_OnLoad`/`RegisterNatives` hit means
+JNI is bound dynamically** — the static export table hides the mapping; dump it at
+runtime by hooking `art::JNI::RegisterNatives`. The anti-tamper indicators here
+explain crashes you'll hit in Phase 7 and point to the function to hook. Full
+static + dynamic workflow, and handoff to the `skw-analyzing-binaries` /
+`skw-exploiting-memory-corruption` skills for deep native RE, is in
+`<skill-directory>/references/native-and-so.md`.
 
 ### Phase 7: Dynamic Analysis with Frida (Adaptive Loop)
 
@@ -542,6 +677,43 @@ If `find-firebase-config.sh` reported `API_KEY_COUNT > 1`, re-run `test-firebase
 
 See `<skill-directory>/references/firebase-google-api-testing.md` for the full response-interpretation table (`SERVICE_DISABLED`, `PERMISSION_DENIED`, `ADMIN_ONLY_OPERATION`, `OPERATION_NOT_ALLOWED`, `NO_TEMPLATE`, etc.) and for the raw curl commands to re-run any single probe manually.
 
+### Phase 10: Patch, Repack & Verify (authorized modification)
+
+Run this phase only to modify an app you are **authorized** to modify (your own
+app, a signed engagement, CTF, or a sandbox). Modification changes the app's
+signature and can trip integrity checks — confirm scope before starting.
+
+Two patch layers, cheapest-safe first:
+
+1. **Byte-level (equal-length) Dex patch** — best on hardened apps: it avoids
+   rebuilding/re-verifying methods and keeps the change surgical.
+   ```bash
+   python3 <skill-directory>/scripts/dex-byte-patch.py classes.dex --find <hex>
+   python3 <skill-directory>/scripts/dex-byte-patch.py classes.dex --patch spec.json -o patched.dex
+   python3 <skill-directory>/scripts/dex-byte-patch.py patched.dex --verify
+   ```
+   Equal-length only; the script recomputes the Dex Adler-32 checksum and SHA-1
+   signature so the result loads. Mind the `move-result` adjacency hazard. See
+   `<skill-directory>/references/byte-level-patching.md`.
+
+2. **Smali rebuild + repack** — when the edit changes instruction length or spans
+   methods:
+   ```bash
+   bash <skill-directory>/scripts/repack.sh --decode app.apk        # -> DECODED_DIR
+   # edit the smali under the decoded dir
+   bash <skill-directory>/scripts/repack.sh --all <decoded-dir>     # build -> align -> sign -> install -> verify
+   ```
+   `repack.sh` enforces `zipalign` before `apksigner`, auto-creates a debug
+   keystore, and runs an install + launch health check (`INSTALL_STATUS`,
+   `LAUNCH_STATUS`). See `<skill-directory>/references/repack-and-sign.md` for
+   signing schemes and the signature-pinning / LSPosed-module fallbacks when a
+   resign is rejected.
+
+**Verification is mandatory (definition of done).** A patch is `INFERRED` until
+you prove it landed (a Dex/class diff or `--verify`) **and** the app installs and
+launches (`INSTALL_STATUS=ok`, `LAUNCH_STATUS=running`). Save the diff and the
+health-check output as evidence. See `<skill-directory>/references/verification.md`.
+
 ---
 
 At the end of the workflow, deliver:
@@ -560,6 +732,11 @@ At the end of the workflow, deliver:
    - Per-probe verdicts from `test-firebase-google.sh` (the Markdown report)
    - Highlighted `VULNERABLE` findings with the response excerpt and impact
    - Any additional keys tested and their separate reports
+8. **Target triage** (Phase 2.5) — the detected runtime and packer, and the toolchain used if a non-Java runtime or packer was found
+9. **Native analysis** (Phase 6.5, if native libs present) — JNI bindings, native anti-tamper mechanisms, and any native-only secrets/URLs
+10. **Modifications** (Phase 10, if performed) — the patch layer used, the before/after diff proving the patch landed, and the install+launch verification result
+
+Every finding above carries a claim-strength label (`references/verification.md`); state what was checked-and-clean, not only what was found.
 
 Use `--report report.md` on find-api-calls.sh to generate a structured Markdown report automatically.
 
@@ -573,3 +750,11 @@ Use `--report report.md` on find-api-calls.sh to generate a structured Markdown 
 - `<skill-directory>/references/firebase-google-api-testing.md` — Phase 9 playbook: Firebase Auth, Realtime DB, Firestore, Remote Config, Storage, Dynamic Links, FCM, Gemini, billable Maps/AI probes
 - `<skill-directory>/references/android-fragment-injection.md` — Phase 8 playbook: detecting and exploiting Fragment Injection via exported PreferenceActivity, adb/Frida confirmation, result classification, remediation
 - `<skill-directory>/references/setup-guide.md` — Frida setup section covers Python venv, frida-server, and version matching
+- `<skill-directory>/references/verification.md` — Operating rules: claim-strength ladder (OBSERVED/MEASURED/INFERRED/UNVERIFIED) and the definition-of-done checklist (applies to every phase)
+- `<skill-directory>/references/troubleshooting-index.md` — Operating rules: symptom→action index and the two-strike rule
+- `<skill-directory>/references/framework-runtimes.md` — Phase 2.5: Flutter/Dart-AOT, React Native/Hermes, Unity IL2CPP/Mono, Xamarin, Cordova toolchains and routing
+- `<skill-directory>/references/packers.md` — Phase 2.5: packer/protector families and the dump → repair → re-decompile recovery loop
+- `<skill-directory>/references/protocol-reverse.md` — Phase 5: protobuf/gRPC/gRPC-Web decoding, schema recovery, QUIC/HTTP3 notes
+- `<skill-directory>/references/native-and-so.md` — Phase 6.5: JNI static vs dynamic (RegisterNatives) binding, native anti-tamper, radare2/Ghidra + Frida workflow
+- `<skill-directory>/references/byte-level-patching.md` — Phase 10: equal-length Dex byte patching, header/checksum repair, move-result hazard
+- `<skill-directory>/references/repack-and-sign.md` — Phase 10: apktool decode/build, zipalign + apksigner, signing schemes, post-install hazards
