@@ -159,7 +159,7 @@ phpMyAdmin, Swagger, Adminer, Tomcat, GraphQL, Elasticsearch), auth-gated
 
 Run nuclei against the ranked queue with JSONL output, =-rate-limit $RATE=, and
 =-severity low,medium,high,critical=. Enable detection tags (=takeover=,
-=exposures=, =misconfiguration=, =cve=) *and* the active DAST/fuzzing templates for
+=exposure=, =misconfig=, =cve=) *and* the active DAST/fuzzing templates for
 =xss=, =sqli=, =ssti=, =ssrf=, =redirect=, =crlf= (use =-dast= where the image's
 nuclei supports it). Keep =-exclude-tags dos,intrusive-dos= — DAST firing is
 allowed, denial-of-service is not. Use Stage 1 tech fingerprints (=httpx -td=) to
