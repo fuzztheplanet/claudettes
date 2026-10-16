@@ -2,8 +2,8 @@
 name: skw-semgrep
 description: >-
   Runs a Semgrep security scan over a codebase: detects languages, selects
-  rulesets, presents the plan for explicit approval, then runs every approved
-  ruleset through scripts/run-scans.sh, which batches the semgrep processes and
+  rulesets, compiles the scan plan, then runs every ruleset
+  through scripts/run-scans.sh, which batches the semgrep processes and
   writes scans.json, and merges the output to SARIF. Supports two scan modes,
   "run all" for full ruleset coverage and "important only" for security
   findings at medium-to-high confidence and impact. Uses Semgrep Pro for
@@ -19,11 +19,10 @@ Run a Semgrep scan with automatic language detection, parallel execution, and me
 ## Essential Principles
 
 1. **Always use `--metrics=off`** — Semgrep sends telemetry by default; `--config auto` also phones home. Every `semgrep` command must include `--metrics=off` to prevent data leakage during security audits.
-2. **User must approve the scan plan (Step 3 is a hard gate)** — The original "scan this codebase" request is NOT approval. Present exact rulesets, target, engine, and mode; wait for explicit "yes"/"proceed" before spawning scanners.
-3. **Third-party rulesets are required, not optional** — Trail of Bits, 0xdea, and Decurity rules catch vulnerabilities absent from the official registry. Include them whenever the detected language matches.
-4. **`scripts/run-scans.sh` generates the commands; do not write them yourself** — it builds every `semgrep` line from the approved list. That is what makes `--metrics=off`, the `--include` scoping rule, and the parallel dispatch properties of the code rather than instructions. Give it the approved rulesets and let it run.
-5. **Always check for Semgrep Pro before scanning** — Pro enables cross-file taint tracking and catches ~250% more true positives. Skipping the check means silently missing critical inter-file vulnerabilities.
-6. **Report what did not run** — `scans.json` carries `failed` and `skipped` alongside `scans`. A ruleset whose repo would not clone, or whose scan exited non-zero, must appear in the report. A partial scan presented as a complete one is worse than no scan.
+2. **Third-party rulesets are required, not optional** — Trail of Bits, 0xdea, and Decurity rules catch vulnerabilities absent from the official registry. Include them whenever the detected language matches.
+3. **`scripts/run-scans.sh` generates the commands; do not write them yourself** — it builds every `semgrep` line from the ruleset list. That is what makes `--metrics=off`, the `--include` scoping rule, and the parallel dispatch properties of the code rather than instructions. Give it the selected rulesets and let it run.
+4. **Always check for Semgrep Pro before scanning** — Pro enables cross-file taint tracking and catches ~250% more true positives. Skipping the check means silently missing critical inter-file vulnerabilities.
+5. **Report what did not run** — `scans.json` carries `failed` and `skipped` alongside `scans`. A ruleset whose repo would not clone, or whose scan exited non-zero, must appear in the report. A partial scan presented as a complete one is worse than no scan.
 
 ## When to Use
 
@@ -68,7 +67,7 @@ The output directory is resolved **once** at the start of Step 1 and used throug
 
 ```
 $OUTPUT_DIR/
-├── rulesets.json                # The approved plan (Step 3), read by run-scans.sh (Step 4)
+├── rulesets.json                # The scan plan (Step 3), read by run-scans.sh (Step 4)
 ├── scans.json                   # What ran, failed, skipped, and covered nothing (Step 4)
 ├── raw/                         # Per-scan raw output (unfiltered)
 │   ├── python-python.json        # <language>-<ruleset> for language-scoped rules
@@ -124,8 +123,8 @@ See [scan-modes.md](references/scan-modes.md) for metadata criteria and jq filte
 │ MAIN SESSION (this skill)                                        │
 │ Step 1: Detect languages + check Pro availability                │
 │ Step 2: Select scan mode + rulesets (ref: rulesets.md)           │
-│ Step 3: Present plan + rulesets, get approval [⛔ HARD GATE]     │
-│ Step 4: Run scripts/run-scans.sh with the approved rulesets      │
+│ Step 3: Present plan + rulesets, write rulesets.json             │
+│ Step 4: Run scripts/run-scans.sh with the selected rulesets      │
 │ Step 5: Post-filter, merge, report, delete repos/                │
 └──────────────────────────────────────────────────────────────────┘
          │ Step 4: Bash
@@ -144,8 +143,8 @@ See [scan-modes.md](references/scan-modes.md) for metadata criteria and jq filte
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-The approval gate stays in the session; the script is execution only and asks nothing. The
-approved list reaches it as a JSON file, so the scan cannot reach a ruleset the user declined.
+The plan stays in the session; the script is execution only and asks nothing. The
+ruleset list reaches it as a JSON file, so the scan runs exactly the rulesets the plan names.
 
 Cross-language rulesets go in one shared unit rather than being repeated per language.
 `p/security-audit`, `p/secrets`, and the third-party repos scan the whole target unscoped,
@@ -160,11 +159,11 @@ merge to dedup the copies.
 |------|--------|------|---------------|
 | 1 | Resolve output dir, detect languages + Pro availability | — | Use Glob, not Bash |
 | 2 | Select scan mode + rulesets | — | [rulesets.md](references/rulesets.md) |
-| 3 | Present plan, get explicit approval | ⛔ HARD | AskUserQuestion |
+| 3 | Present plan, write rulesets.json | — | rulesets.json |
 | 4 | Run the scans | — | `scripts/run-scans.sh` |
 | 5 | Post-filter, merge, report, clean up | — | Merge script (below) |
 
-**Task enforcement:** On invocation, create 5 tasks with blockedBy dependencies (each step blocks the previous). Step 3 is a HARD GATE — mark complete ONLY after user explicitly approves.
+**Task enforcement:** On invocation, create 5 tasks with blockedBy dependencies (each step blocks the previous).
 
 **Merge command (Step 5):**
 
@@ -191,7 +190,7 @@ file; `--important` instead keeps the findings the JSON filter kept, matched on
 
 | Component | Purpose |
 |-----------|---------|
-| `scripts/run-scans.sh` | Builds every scan command from the approved rulesets, runs them in batches, and writes `scans.json` |
+| `scripts/run-scans.sh` | Builds every scan command from the selected rulesets, runs them in batches, and writes `scans.json` |
 
 Step 4 is a Bash call. No subagent runs any part of the scan: exit codes and finding counts are
 read from the processes and the JSON they wrote.
@@ -200,11 +199,8 @@ read from the processes and the JSON they wrote.
 
 | Shortcut | Why It's Wrong |
 |----------|----------------|
-| "User asked for scan, that's approval" | Original request ≠ plan approval. Present plan, use AskUserQuestion, await explicit "yes" |
-| "Step 3 task is blocking, just mark complete" | Lying about task status defeats enforcement. Only mark complete after real approval |
-| "I already know what they want" | Assumptions cause scanning wrong directories/rulesets. Present plan for verification |
-| "Just use default rulesets" | User must see and approve exact rulesets before scan |
-| "Add extra rulesets without asking" | Modifying approved list without consent breaks trust |
+| "I already know what they want" | Assumptions cause scanning wrong directories/rulesets. Present the plan so the chosen rulesets are visible |
+| "Just use default rulesets" | Present the exact rulesets in the plan; defaults can miss language/framework coverage |
 | "Third-party rulesets are optional" | Trail of Bits, 0xdea, Decurity catch vulnerabilities not in official registry — REQUIRED |
 | "Use --config auto" | Sends metrics; less control over rulesets |
 | "I'll just run the semgrep commands myself" | `run-scans.sh` is what enforces `--metrics=off`, the `--include` rule and the output-directory `--exclude`. Hand-written commands drop them silently |
@@ -235,12 +231,11 @@ read from the processes and the JSON they wrote.
 - [ ] Languages detected with file counts; Pro status checked
 - [ ] Scan mode selected by user (run all / important only)
 - [ ] Rulesets include third-party rules for all detected languages
-- [ ] User explicitly approved the scan plan (Step 3 gate passed)
 - [ ] `run-scans.sh` exited 0 and wrote `$OUTPUT_DIR/scans.json`
 - [ ] `failed` and `skipped` from `scans.json` are empty, or listed in the report
 - [ ] Scans marked `partial` in `scans.json` are none, or listed in the report — they ran with some of their rules failing to compile
 - [ ] Every `semgrep` command used `--metrics=off`
-- [ ] Approved plan written to `$OUTPUT_DIR/rulesets.json` at the Step 3 gate, and passed to
+- [ ] Scan plan written to `$OUTPUT_DIR/rulesets.json` at Step 3, and passed to
       the scanner unchanged
 - [ ] `coveredNothing` from `scans.json` is empty, or listed in the report
 - [ ] Raw per-scan outputs stored in `$OUTPUT_DIR/raw/`

@@ -127,7 +127,7 @@ done
 
 Never assume a database is named `codeql.db` — discover it by its marker file.
 
-**When multiple databases are found:** use `AskUserQuestion` to let the user select which database to use, or to build a new one, from the language and creation time printed above. `AskUserQuestion` takes at most four options, so with more databases than that, offer the three most recent plus "Build a new database" and list the rest in the prompt text. **Skip `AskUserQuestion` if the user explicitly stated which database to use or to build a new one in their prompt.**
+**When multiple databases are found:** select the most recently created one automatically, using the language and creation time printed above, and state which one was chosen. If the user explicitly named a database to use or asked to build a new one in their prompt, honour that instead.
 
 ## Quick Start
 
@@ -180,8 +180,7 @@ These shortcuts lead to missed findings. Do not accept them:
 - **"No findings means the code is secure"** - Run `check_db_quality.py` and `verify_query_suite.py` and report that they passed. Without them, zero findings and a database that extracted nothing are the same output.
 - **"I'll just run the default suite"** / **"I'll just pass the pack names directly"** - Each pack's `defaultSuiteFile` applies hidden filters and can produce zero results. Always use an explicit suite reference.
 - **"I'll put files in the current directory"** - All generated files must go in `$OUTPUT_DIR`. Scattering files in the working directory makes cleanup impossible and risks overwriting previous runs.
-- **"Just use the first database I find"** - Multiple databases may exist for different languages or from previous runs. When more than one is found, present all options to the user. Only skip the prompt when the user already specified which database to use.
-- **"The user said 'scan', that means they want me to pick a database"** - "Scan" is not database selection. If multiple databases exist and the user didn't name one, ask.
+- **"Just use the first database I find"** - Multiple databases may exist for different languages or from previous runs. Picking whichever `find` returns first can select a stale build or the wrong language. When more than one is found, use the most recently created one (or the database the user named).
 
 ---
 
@@ -200,7 +199,7 @@ track progress. Decide which steps are worth tracking based on the run.
 
 ### Auto-Detection Logic
 
-**If user explicitly specifies** what to do (e.g., "build a database", "run analysis on ./my-db"), execute that workflow directly. **Do NOT call `AskUserQuestion` for database selection if the user's prompt already makes their intent clear** — e.g., "build a new database", "analyze the codeql database in static_analysis_codeql_2", "run a full scan from scratch".
+**If user explicitly specifies** what to do (e.g., "build a database", "run analysis on ./my-db"), execute that workflow directly — e.g., "build a new database", "analyze the codeql database in static_analysis_codeql_2", "run a full scan from scratch".
 
 **Default pipeline for "test", "scan", "analyze", or similar:** Discover existing databases
 using the command in [Database Discovery](#database-discovery) above, then decide.
@@ -208,26 +207,26 @@ using the command in [Database Discovery](#database-discovery) above, then decid
 | Condition | Action |
 |-----------|--------|
 | No databases found | Resolve new `$OUTPUT_DIR`, execute build → extensions → analysis (full pipeline) |
-| One database found | Use `AskUserQuestion`: reuse it or build new? |
-| Multiple databases found | Use `AskUserQuestion`, capped at four options — see [Database Discovery](#database-discovery) |
-| User explicitly stated intent | Skip `AskUserQuestion`, act on their instructions directly |
+| One database found | Reuse it: proceed to extensions → analysis |
+| Multiple databases found | Use the most recently created one — see [Database Discovery](#database-discovery) |
+| User explicitly stated intent | Act on their instructions directly |
 
-### Database Selection Prompt
+### Database Selection
 
 When existing databases are found **and the user did not explicitly specify which to use**,
-present them via `AskUserQuestion` under the header "Existing CodeQL Databases". Label each
-option with the path, language, and creation time collected above — `./static_analysis_codeql_1/codeql.db
-(language: python, created: 2026-02-24)` — and make the last option "Build a new database".
+select the most recently created one, using the path, language, and creation time collected
+above — e.g. `./static_analysis_codeql_1/codeql.db (language: python, created: 2026-02-24)`.
+State which database was chosen.
 
 After selection:
-- **If user picks an existing database:** Set `$OUTPUT_DIR` to its parent directory (or the directory containing it), set `$DB_NAME` to the selected path, then proceed to extensions → analysis.
-- **If user picks "Build new":** Resolve a new `$OUTPUT_DIR`, execute build → extensions → analysis.
+- Set `$OUTPUT_DIR` to its parent directory (or the directory containing it), set `$DB_NAME` to the selected path, then proceed to extensions → analysis.
+- If the user named a database or asked to build a new one, honour that: for a new build, resolve a new `$OUTPUT_DIR` and execute build → extensions → analysis.
 
-### General Decision Prompt
+### Default Workflow
 
-If neither the database nor the workflow is clear from the prompt, offer the four
-workflows via `AskUserQuestion` — full scan (recommended), build database, create data
-extensions, run analysis — naming any databases found and the resolved `$OUTPUT_DIR`.
+If neither the database nor the workflow is clear from the prompt, default to a full scan —
+build a database (or reuse the most recently created existing one) → create data extensions →
+run analysis — naming any databases found and the resolved `$OUTPUT_DIR`.
 
 ---
 

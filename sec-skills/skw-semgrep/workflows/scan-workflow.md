@@ -9,18 +9,10 @@ On invocation, create these tasks with dependencies:
 ```
 TaskCreate: "Detect languages and Pro availability" (Step 1)
 TaskCreate: "Select scan mode and rulesets" (Step 2) - blockedBy: Step 1
-TaskCreate: "Present plan with rulesets, get approval" (Step 3) - blockedBy: Step 2
-TaskCreate: "Execute scans with approved rulesets and mode" (Step 4) - blockedBy: Step 3
+TaskCreate: "Present plan and write rulesets.json" (Step 3) - blockedBy: Step 2
+TaskCreate: "Execute scans with the selected rulesets and mode" (Step 4) - blockedBy: Step 3
 TaskCreate: "Merge results and report" (Step 5) - blockedBy: Step 4
 ```
-
-### Mandatory Gate
-
-| Task | Gate Type | Cannot Proceed Until |
-|------|-----------|---------------------|
-| Step 3 | **HARD GATE** | User explicitly approves rulesets + plan |
-
-Mark Step 3 as `completed` ONLY after user says "yes", "proceed", "approved", or equivalent.
 
 ---
 
@@ -46,9 +38,8 @@ else
 fi
 mkdir -p "$OUTPUT_DIR/raw" "$OUTPUT_DIR/results"
 
-# Absolute from here on. run-scans.sh rejects a relative path, and that rejection lands
-# *after* the user has passed the hard gate, so a path this skill generated itself would send
-# them back through approval.
+# Absolute from here on. run-scans.sh rejects a relative path, so resolve it now rather than
+# letting that rejection surface later in the run.
 OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
 # The -d test first: `cd ""` returns 0, so a TARGET that was never bound would pass a bare
 # `cd || exit` and silently resolve to the session's CWD, scanning whatever happens to be there.
@@ -72,7 +63,7 @@ fi
 semgrep --version
 # --metrics=off applies here too. This is the first semgrep invocation of the run and it
 # resolves p/default against the registry, so without the flag an audit phones home before
-# the user has approved anything. Principle 1 has no exceptions.
+# the scan has even started. Principle 1 has no exceptions.
 semgrep --pro --validate --metrics=off --config p/default 2>/dev/null && echo "Pro: AVAILABLE" || echo "Pro: NOT AVAILABLE"
 ```
 
@@ -159,7 +150,7 @@ The algorithm covers:
 5. **Required** third-party rulesets (Trail of Bits, 0xdea, Decurity — NOT optional)
 6. Registry verification
 
-**Output:** Structured JSON passed to Step 3 for user review:
+**Output:** Structured JSON passed to Step 3:
 
 ```json
 {
@@ -173,15 +164,10 @@ The algorithm covers:
 
 ---
 
-## Step 3: CRITICAL GATE — Present Plan and Get Approval
+## Step 3: Present Plan and Write rulesets.json
 
 > **Entry:** Step 2 complete — scan mode and rulesets selected.
-> **Exit:** User has explicitly approved the plan (quoted confirmation).
-
-> **⛔ MANDATORY CHECKPOINT — DO NOT SKIP**
->
-> This step requires explicit user approval before proceeding.
-> User may modify rulesets before approving.
+> **Exit:** Plan presented; `rulesets.json` written for Step 4.
 
 Present plan to user with **explicit ruleset listing**:
 
@@ -223,20 +209,11 @@ otherwise keep them. Choose "Run all" if you want those.
 **Third-party (auto-included for detected languages):**
 - [x] Trail of Bits rules - https://github.com/trailofbits/semgrep-rules
 
-**Want to modify rulesets?** Tell me which to add or remove.
-**Ready to scan?** Say "proceed" or "yes".
+This is the plan about to run. (If the user asks for a ruleset to be added or removed, apply
+the change before writing the file below.)
 ```
 
-**⛔ STOP: Await explicit user approval.**
-
-1. **If user wants to modify rulesets:** Add/remove as requested, re-present the updated plan, return to waiting.
-2. **Use AskUserQuestion** if user hasn't responded:
-   ```
-   "I've prepared the scan plan with N rulesets (including Trail of Bits). Proceed with scanning?"
-   Options: ["Yes, run scan", "Modify rulesets first"]
-   ```
-3. **Valid approval:** "yes", "proceed", "approved", "go ahead", "looks good", "run it"
-4. **NOT approval:** User's original request ("scan this codebase"), silence, questions about the plan
+After presenting the plan, write `rulesets.json` (below) and proceed to Step 4.
 
 ### Pre-Scan Checklist
 
@@ -244,25 +221,23 @@ Before marking Step 3 complete:
 - [ ] Target directory shown to user
 - [ ] Engine type (Pro/OSS) displayed
 - [ ] Languages detected and listed
-- [ ] **All rulesets explicitly listed with checkboxes**
-- [ ] User given opportunity to modify rulesets
-- [ ] User explicitly approved (quote their confirmation)
+- [ ] **All rulesets explicitly listed**
 - [ ] **Final ruleset list captured for Step 4**
 
-### Log Approved Rulesets
+### Log the Rulesets
 
-After approval, write the approved plan to `$OUTPUT_DIR/rulesets.json`. This is the same file
-Step 4 hands to the scanner: what the user approved and what runs are one artifact, so there is
-no second copy to transcribe and no way for the two to disagree.
+Write the plan to `$OUTPUT_DIR/rulesets.json`. This is the same file Step 4 hands to the
+scanner: the presented plan and what runs are one artifact, so there is no second copy to
+transcribe and no way for the two to disagree.
 
-Fill in the plan that was just approved. Every value is an array, even a single ruleset:
+Fill in the plan just presented. Every value is an array, even a single ruleset:
 
 ```bash
 cat > "$OUTPUT_DIR/rulesets.json" << 'RULESETS'
 {
   "baseline": [<the always-on rulesets from Step 2>],
-  "<each detected language>": [<its approved rulesets>],
-  "third_party": [<approved repository URLs>]
+  "<each detected language>": [<its selected rulesets>],
+  "third_party": [<selected repository URLs>]
 }
 RULESETS
 ```
@@ -282,7 +257,7 @@ without scanning.
 
 ## Step 4: Run the Scans
 
-> **Entry:** Step 3 approved — user explicitly confirmed the plan.
+> **Entry:** Step 3 complete — `rulesets.json` written.
 > **Exit:** `$OUTPUT_DIR/scans.json` exists; result files exist in `$OUTPUT_DIR/raw/`.
 
 Run the script against the plan Step 3 already wrote. One Bash call; there is no subagent in
@@ -296,9 +271,9 @@ this step, and no second copy of the ruleset list to compose here.
   --rulesets "$OUTPUT_DIR/rulesets.json"
 ```
 
-Do not rewrite `rulesets.json` here. It is the plan the user approved at the Step 3 gate, and
-regenerating it at this point is how a ruleset nobody agreed to reaches the scanner. If it needs
-to change, go back to Step 3 and get the change approved.
+Do not rewrite `rulesets.json` here. It is the plan Step 3 wrote, and regenerating it at this
+point is how a ruleset that is not in the plan reaches the scanner. If it needs to change, go
+back to Step 3 and rewrite it there.
 
 `--mode` is `run-all` or `important-only`. Add `--pro` only when Step 1
 printed `Pro: AVAILABLE`; it puts `--pro` on every command, so passing it without a licence
@@ -328,7 +303,7 @@ and the severity flags are all its job, not yours. It writes `$OUTPUT_DIR/scans.
 **A non-zero exit means no scan succeeded.** The script exits 1 when `scans` is empty, so a run
 that produced nothing fails loudly rather than handing Step 5 an empty result to report as zero
 findings. Read the message, say that no scan ran, and stop; do not retry with adjusted
-arguments, because the approved plan is what produced them.
+arguments, because the scan plan is what produced them.
 
 **If `failed` or `skipped` is non-empty**, carry both into the Step 5 report. A run that covered
 four of nine rulesets reads exactly like one that covered four of four unless you say otherwise.
@@ -454,7 +429,7 @@ one finding flagged by two rulesets is one row in the merge and two in that sum]
 Results written to:
 - $OUTPUT_DIR/results/results.sarif (merged SARIF)
 - $OUTPUT_DIR/raw/ (per-scan raw results, unfiltered)
-- $OUTPUT_DIR/rulesets.json (the approved plan, as passed to the scanner)
+- $OUTPUT_DIR/rulesets.json (the scan plan, as passed to the scanner)
 ```
 
 **Verify** before reporting: confirm `results.sarif` exists and is valid JSON.

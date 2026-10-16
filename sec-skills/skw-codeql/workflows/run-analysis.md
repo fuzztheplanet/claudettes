@@ -15,13 +15,13 @@ Two modes control analysis scope. Both use all installed packs — the differenc
 
 ---
 
-## The one gate
+## The plan
 
-Ask once, in Step 3, and present everything the run depends on together: scan mode, query
-packs, model packs, and threat model.
+Step 3 presents everything the run depends on together — scan mode, query packs, model packs,
+and threat model — with the defaults filled in, then proceeds.
 
-Let the user change any part, then proceed. If the user already specified something in
-their prompt, show it as chosen rather than asking again.
+If the user already specified something in their prompt, show it as chosen; otherwise the
+defaults apply. The user can still change any part, but the run does not wait on it.
 
 ---
 
@@ -65,21 +65,18 @@ if [ -z "${DB_NAME:-}" ]; then
   elif [ "${#FOUND_DBS[@]}" -eq 1 ]; then
     DB_NAME="${FOUND_DBS[0]}"
   else
-    # More than one: select with AskUserQuestion, at most four options — the three most
-    # recent plus "Build a new database", the rest named in the prompt text. Skip the
-    # prompt when the user already said which database to use.
-    #
-    # DB_NAME stays unset here on purpose, and the check below turns that into an error.
-    # Falling through to FOUND_DBS[0] would analyse whichever database `find` happened to
-    # return first — a different language or a stale build, chosen without the user ever
-    # being told there was a choice. The `:` is required: an else branch of only comments
-    # is a bash syntax error.
-    :
+    # More than one: default to the most recently built database (newest directory mtime).
+    # A database the user named in their prompt would already have set DB_NAME above, so
+    # this branch is only reached when nothing was specified. Picking FOUND_DBS[0] blindly
+    # would analyse whichever database `find` happened to return first — possibly a
+    # different language or a stale build — so sort by mtime and take the newest instead.
+    DB_NAME=$(ls -dt "${FOUND_DBS[@]}" 2>/dev/null | head -n1)
+    echo "Multiple databases found; using the most recent: $DB_NAME" >&2
   fi
 fi
 
 if [ -z "${DB_NAME:-}" ]; then
-  echo "ERROR: more than one database found. Ask which one, then re-run this block with DB_NAME set." >&2
+  echo "ERROR: no CodeQL database could be selected." >&2
   exit 1
 fi
 
@@ -87,7 +84,7 @@ CODEQL_LANG=$(codeql resolve database --format=json -- "$DB_NAME" | jq -r '.lang
 echo "Using: $DB_NAME (language: $CODEQL_LANG)"
 ```
 
-If the database holds more than one language, ask which to analyze.
+If the database holds more than one language, default to the primary language (`languages[0]`, already set in `CODEQL_LANG`); analyze another only if the user names it.
 
 ---
 
@@ -126,13 +123,13 @@ Record all detected packs for Step 3.
 
 ---
 
-### Step 3: Confirm the Plan
+### Step 3: Present the Plan
 
 **Entry:** Step 2 complete (mode, pack availability, and model packs all determined)
-**Exit:** User confirmed; flag arrays built (`THREAT_MODEL_FLAGS`, `MODEL_PACK_FLAGS`, `ADDITIONAL_PACK_FLAGS`)
+**Exit:** Flag arrays built (`THREAT_MODEL_FLAGS`, `MODEL_PACK_FLAGS`, `ADDITIONAL_PACK_FLAGS`)
 
-Present the whole plan in one `AskUserQuestion`, defaults filled in, and let the user
-change any part before proceeding:
+Present the whole plan with the defaults filled in, then proceed. If the user asks to change
+any part, apply it before building the flags:
 
 ```
 ## CodeQL Analysis Plan
@@ -143,7 +140,7 @@ change any part before proceeding:
 **Model packs:** <detected packs, or "None">
 **Threat model:** Remote only (default) | + Local | All sources
 
-Change anything, or say proceed.
+These defaults apply; tell me if you want any part changed.
 ```
 
 Defaults, all overridable: **run all**, every installed pack, every detected model pack,

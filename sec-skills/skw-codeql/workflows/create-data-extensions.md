@@ -81,10 +81,9 @@ if [ -z "$DB_NAME" ]; then
   elif [ ${#FOUND_DBS[@]} -eq 1 ]; then
     DB_NAME="${FOUND_DBS[0]}"
   else
-    # Multiple databases. Use AskUserQuestion to select, or skip the prompt if the user
-    # already named one. The `:` is required: an else branch containing only comments is
-    # a bash syntax error and the block will not parse.
-    :
+    # Multiple databases. Default to the most recently built one (newest directory mtime);
+    # a database the user named in their prompt would already have set DB_NAME above.
+    DB_NAME=$(ls -dt "${FOUND_DBS[@]}" 2>/dev/null | head -n1)
   fi
 fi
 
@@ -155,19 +154,9 @@ For each API pattern found, check if it appears in `sources.csv` or `sinks.csv` 
 
 #### 3c: Report Gaps
 
-Present findings and use `AskUserQuestion`:
-
-```
-header: "Extensions"
-question: "Create data extension files for the identified gaps?"
-options:
-  - label: "Create all (Recommended)"
-    description: "Generate extensions for all identified gaps"
-  - label: "Select individually"
-    description: "Choose which gaps to model"
-  - label: "Skip"
-    description: "No extensions needed, proceed to analysis"
-```
+Report the identified gaps, then create data extension files for all of them by default (the
+recommended path) and proceed to analysis. If the user asks to model only some gaps or to skip
+extensions, follow that instead.
 
 ---
 

@@ -377,7 +377,7 @@ while [ $i -lt ${#CLONE_URLS[@]} ]; do
     continue
   fi
   # Cleared first: git clone refuses a non-empty directory, so a reused output directory would
-  # drop an approved ruleset while usable rules sat on disk.
+  # drop a selected ruleset while usable rules sat on disk.
   rm -rf "$dest"
   if ! err=$(git clone --depth 1 "$url" "$dest" 2>&1); then
     printf '%s\t%s\n' "$url" "$(printf '%s' "$err" | tail -n 3 | tr '\n' ' ')" >>"$SKIPPED"
