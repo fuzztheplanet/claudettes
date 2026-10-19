@@ -89,6 +89,14 @@ Rules that make findings act-on-able:
   pulled (`git log --oneline <checkout>..origin/main -- <file>`). One
   already-patched finding teaches the reader to distrust the rest.
 
+The example above is an HTTP app, but the shape is interface-neutral. HTTP is one
+possible interface, not the default: a library finding's reproduction is a
+function call, a parser's is a malformed-input fixture, a CLI's is a command, a
+desktop app's is an IPC message or file, a binary's is a crashing input under a
+sanitizer, an infrastructure finding's is a locally rendered policy. Keep the five
+questions; swap `curl` for the target's native interface, and do not force an
+endpoint onto a target that has none.
+
 ### Invariants to check before a finding leaves draft
 
 Four of the rules above are mechanical enough to check rather than judge. Run
@@ -115,6 +123,39 @@ the candidate worklist with the reason attached, so a later pass knows what
 would promote it. See `skw-orchestrating-vulnerability-research` for how candidates
 are graded when a separate critic does the promoting.
 
+These four checks, plus the verdict and severity rules below, are encoded in
+`references/findings-schema.md` and enforced by `scripts/validate_findings.py`
+over a `findings.json`. Run it before a report leaves draft: a machine that
+refuses a needs-validation record carrying a severity, or a confirmed record with
+no evidence, catches the exact mistakes this section describes before a reader
+does. That schema is also the contract a multi-agent run's hunters and critics
+emit against — see `skw-orchestrating-vulnerability-research`.
+
+### When the source is proven but a decisive fact is not visible
+
+Some candidates are neither confirmable nor dismissable from where you stand: the
+source path is real and reaches the sink, but whether it actually fires depends
+on a fact outside what you can observe — a deployment toggle, a proxy or WAF rule,
+an identity-provider policy, a provider default, a runtime flag. That is not a
+low-confidence finding, and it is not a dead candidate. It is **needs-validation**:
+a distinct disposition with an exact blocker and a plan, and *no severity*.
+
+Report it in its own section, never in the findings table:
+
+- **State the blocker as one concrete fact**, not a worry. "Exploitable only if
+  the ingress does not strip `X-Forwarded-For`, and the repo does not contain the
+  ingress config" — not "depends on deployment."
+- **Give the check that resolves it.** Either a *local* one the reader can run (a
+  fixture, a unit test, a rendered config) or an *owner-observed* one (ask them to
+  read one setting), and keep it non-destructive. Never a plan to send live
+  traffic to resolve it.
+- **No severity, no CVSS.** A needs-validation lead with a severity has been
+  silently promoted to a finding it did not earn. Severity is for demonstrated
+  impact; this has an unknown, not an impact.
+
+A needs-validation lead is more useful than a guessed-High finding and more honest
+than silence: it hands the owner the one question that settles it.
+
 ## Severity
 
 CVSS is the common currency, but it scores a vulnerability in the abstract.
@@ -140,6 +181,25 @@ A Medium CVSS that breaks tenant isolation for a SaaS product is a P1
 regardless of the number. Say that explicitly rather than letting the score
 argue for you. Conversely, do not inflate scores: a report where everything is
 Critical gets triaged by ignoring it.
+
+Anchor each level to a concrete outcome, not a feeling — and overall severity
+cannot exceed the impact you actually demonstrated:
+
+- **Critical** — an unauthenticated actor gains code execution, full data-store
+  access, or takeover of arbitrary accounts.
+- **High** — an actor fully defeats an explicit control with real consequence:
+  auth bypass, cross-tenant read or write, stored script execution hitting other
+  users, authenticated RCE, or an unauthenticated remote stop of a shared service.
+- **Medium** — a real boundary violation with limited blast radius, uncommon
+  preconditions, or consequences confined to a narrow resource set.
+- **Low** — disclosure of non-secret internals, or an effect that needs sustained
+  effort for minimal gain.
+- **Informational** — a confirmed but minimal-impact observation, useful mainly as
+  a prerequisite inside a larger finding.
+
+The high/medium line is one question: does the demonstrated result *fully defeat*
+an explicit control for an action with real consequence, or only weaken it? If you
+cannot state the concrete damage, the severity is lower than it feels.
 
 **Chained findings**: report the components individually *and* report the chain
 as its own finding with the chain's severity. The chain is what an attacker
@@ -170,9 +230,11 @@ explicitly calls for it.
 1. Executive summary        — 1 page, no jargon, answers "how bad and what now"
 2. Scope and methodology    — what was tested, how, and with what access
 3. Coverage and limitations — what was NOT tested, and why
-4. Findings                 — ordered by severity, each self-contained
-5. Strategic recommendations— themes across findings, not per-finding fixes
-6. Appendices               — tooling, raw output, evidence index, retest results
+4. Findings                 — confirmed, ordered by severity, each self-contained
+5. Needs-validation leads   — proven in source, blocked on one external fact; no severity
+6. Hardening notes          — defense-in-depth gaps with no reachable violation
+7. Strategic recommendations— themes across findings, not per-finding fixes
+8. Appendices               — tooling, raw output, evidence index, retest results
 ```
 
 **The executive summary is written for someone who will read only it.** Three
@@ -190,6 +252,15 @@ into a dispute.
 themes. "Authorization is enforced per handler rather than at the data layer;
 9 of 14 findings share this root cause." That sentence is worth more than the
 nine findings.
+
+**Hardening notes are not findings.** A missing defense-in-depth layer whose
+absence you could not drive to a reachable boundary violation — a missing header
+where no injection reaches, a broad CORS rule on an endpoint with no credentialed
+data — is a hardening note, not a finding with a severity. If Layer A already
+prevents the attack, the absence of Layer B is advice. Keep these in their own
+list so the findings section stays things that are actually broken; a report that
+scores hardening nits as Medium trains the reader to discount the Mediums that
+matter.
 
 ## Writing for the Audience
 
@@ -280,6 +351,9 @@ it.
 
 ## References
 
+- `references/findings-schema.md` and `scripts/validate_findings.py` — the
+  machine-checkable findings contract (confirmed / needs-validation / hardening /
+  rejected) that enforces the invariants and severity rules above
 - `skw-auditing-code-for-vulnerabilities` — the audit-side deliverable format
 - `responding-to-incidents` — incident narratives and postmortems
 - CVSS 4.0 specification; EPSS for exploitation likelihood; CWE for classification

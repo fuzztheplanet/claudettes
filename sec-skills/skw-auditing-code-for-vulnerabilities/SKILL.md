@@ -184,6 +184,14 @@ worst finding, not its best.
   established by reading, and the guard shown inadequate. Report it, labelled.
 - `confirmed` — the above **plus an independent observation**: a PoC that runs, a
   failing test, a request that returns another tenant's row.
+- `needs-validation` — reachability and control are established in source, but the
+  decisive fact is *outside the repo*: a deployment toggle, a proxy or WAF rule, an
+  identity policy, a provider default, a runtime flag. This is not a rung on the
+  confidence ladder — it is a separate disposition. Record the exact missing fact
+  and the check that resolves it (a local fixture, or one setting the owner can
+  read), and carry **no severity**. Do not round it up to `likely` to dodge the
+  unknown, and do not bury it as `speculative`: a proven source path blocked on one
+  external fact is the single most useful thing to hand an owner.
 
 Name a **falsifier** for each finding — the single check that would prove you
 wrong — and record what you **ruled out** and why, so a clean slice is
@@ -236,6 +244,10 @@ These are the thoughts that turn an audit into a formality. Each one is wrong.
 - *"It looks intentional."* Intent is not a control. Note the intent, keep
   the finding.
 - *"The scanner didn't flag it."* Scanners find what they have rules for.
+- *"A security header / hardening layer is missing, so it's a finding."* Only if
+  you can drive it to a reachable boundary violation. If Layer A already stops the
+  attack, the absence of Layer B is a hardening note, not a vulnerability with a
+  severity. Put defense-in-depth gaps in their own list; do not score them.
 - *"I confirmed it, so it's real."* You confirmed it against one checkout and
   your own first read. Revalidate it against what actually ships and against a
   genuine attempt to disprove it before it goes in the report.
@@ -270,6 +282,17 @@ Triage every tool finding through the four verification questions above. A
 report of unverified scanner output is worse than no report — it burns the
 reader's trust and buries the real bugs.
 
+When a check means **building or running the target's own code** — a PoC harness,
+a test, a parser fixture, an `npm install` that fires lifecycle scripts — treat
+that code as untrusted. Run it in a sandbox with no secrets, no writable path
+outside a scratch dir, no network it does not need, and a resource and time cap —
+not on your working account against your real environment. If you cannot enforce
+that, do not run it: record the candidate as `needs-validation` with "no safe
+execution sandbox" as the blocker rather than executing untrusted build steps to
+close it. Static reachability plus a named local check you *could* run is a better
+deliverable than a confirmation bought by running the target's `postinstall` as
+yourself.
+
 ## Audit Deliverable
 
 Track coverage as you go, and state it honestly:
@@ -288,6 +311,13 @@ F1. [High] Tenant isolation bypass in GET /api/reports/:id — <impact> — <rep
 
 Say what you did **not** cover. An audit that claims full coverage it did not
 achieve is the most damaging artifact you can produce.
+
+In a one-pass audit this table is the coverage claim; keep it honest and it is
+enough. In a sustained or repeated campaign, promote it to the structured,
+carried-forward coverage ledger in `skw-orchestrating-vulnerability-research`, so a
+later run can tell a slice that was hunted-and-clean from one that was never
+reached — and does not re-hunt cleared paths or silently inherit "the rest is
+fine" from a run that never touched them.
 
 ## References
 

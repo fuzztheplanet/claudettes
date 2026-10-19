@@ -38,7 +38,7 @@ An example invocation could be as follows:
 # Switch to your project directory
 cd ~/projects/security_analysis_example
 # Copy relevant skills
-mkdir -p .agents/skills && cp -r ~/tools/claudettes/sec-skills/* .agents/skills && ln -sf .agents .claude
+mkdir -p .agents/skills && cp -r ~/tools/skw/claudettes/sec-skills/* .agents/skills && ln -sf .agents .claude
 # Edit target.org to add specific, target-related instructions
 emacs target.org
 # Run the analysis
