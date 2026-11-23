@@ -1,0 +1,530 @@
+* Tooling
+
+This section says which concrete tools this host provides, where each one comes
+from and how to invoke it without surprises. The methodology (for example
+~SCA.org~) decides *which capability* a phase needs and what evidence counts;
+this section decides *which software* delivers it and with which flags. Where
+the two seem to disagree about a tool, the methodology's rules (scope, safety,
+output location) win and this section supplies the mechanics.
+
+The facts below were verified on 2026-11-23 against the
+~/home/skw/tools/skw/dockers~ repository at commit ~fd19f78~ and images built
+from it that day. Re-check them in preflight: images get rebuilt and tool
+versions move.
+
+** Order of preference
+
+Take a tool from the first source that has it:
+
+1. *A real executable on the host* (~type -P <tool>~ prints its path). On
+   2026-11-23 these were: ~rg~, ~jq~, ~curl~, ~git~, ~osv-scanner~ (2.7.0) and
+   ~mitmproxy~. Not on the host: trivy, grype, syft, gitleaks, zizmor,
+   actionlint, act.
+2. *A custom ~skw/*~ image* (catalogue below).
+3. *A pinned official image* for anything else (tag plus digest, never
+   ~latest~).
+4. *Last resort:* install the tool into a scratch directory the methodology
+   allows (for SCA, a directory under the result directory, since the run writes
+   nothing outside the analysis root), and record it.
+
+Building or pulling an image, installing a package and downloading rules or
+databases change the host or reach the network: they need whatever approval the
+execution environment requires, and they are recorded.
+
+** What a tool name really resolves to
+
+~/home/skw/.bashrc~ sources ~/home/skw/tools/skw/aliases.sh~, which sources
+~/home/skw/tools/skw/dockers/aliases.sh~. That file defines a shell *function*
+for almost every tool in the images, so names such as ~semgrep~, ~codeql~,
+~ffuf~, ~sqlmap~, ~trufflehog~, ~gau~, ~gf~, ~nxc~ and ~smbclient~ run ~docker
+run~ rather than a host binary. Consequences:
+
+- ~command -v <tool>~ succeeds for a function even when its image is missing.
+  Use ~type -t <tool>~ (~function~ or ~file~) and ~type -P <tool>~ (real
+  executable path, empty if none).
+- Functions exist only in a shell that sourced that file. They are invisible to
+  ~bash -c~, to scripts (including skill scripts such as the semgrep skill's
+  ~run-scans.sh~ or the codeql skill's ~find_databases.sh~) and to any shell that
+  did not load ~.bashrc~.
+- An agent's shell normally has no terminal. Every wrapper passes ~-i~ and adds
+  ~-t~ only when stdin and stdout are both terminals, so they all run in an agent
+  shell and in pipes (verified for ~semgrep~, ~semgrep-pro-scan~, ~jazzer~,
+  ~codeql~, ~pwn-run~, ~forensic-runit~, ~ad-runit~, ~web-runit~ and the
+  ~skw/web~ tools).
+- A shell keeps the definitions it loaded at startup. One that loaded
+  ~aliases.sh~ before dockers commit ~fd19f78~ (an agent session started
+  earlier, for example) still has wrappers that always pass ~-it~ and fail with
+  ~cannot attach stdin to a TTY-enabled container because stdin is not a
+  terminal~. ~type drunit~ shows which definition the shell holds; ~source
+  /home/skw/tools/skw/dockers/aliases.sh~ loads the current one.
+- A wrapper's options are invisible at the call site, and ~type <tool>~ prints
+  them. The ones worth knowing:
+
+| Wrapper                                              | Adds |
+|------------------------------------------------------+------|
+| ~codeql~ and its helpers, ~unblob~                   | runs as the host user |
+| ~semgrep-pro-scan~                                   | ~--pro~, ~--metrics=off~ and the scan flags below |
+| ~pwn-run~, ~pwn-runit~, ~pwn-shell~                  | ~--network=host --security-opt seccomp=unconfined~ |
+| ~ad-*~ and the AD tools (~nxc~, ~certipy~, …), ~http-server~, ~https-server~, ~evil-winrm~, ~vsftpd~ | ~--network=host~ |
+| ~skw/web~ tool wrappers, ~web-run~, ~web-shell~      | ~--network=host~ only when ~WEB_NETWORK_HOST=1~ |
+| ~nxc~, ~donpapi~                                     | keep state in ~.docker-ad-nxc~ / ~.docker-ad-donpapi~ under the current directory |
+| ~codeql-scan~                                        | writes databases and SARIF into the current directory |
+
+The explicit ~docker run --rm -i …~ forms given below behave the same in every
+shell, also work from scripts and ~bash -c~, and show every option. Use them in
+anything a script runs, when a wrapper's defaults (host network, no seccomp
+filtering, output location) do not suit the run, and in the run record.
+
+** Running ~skw/*~ images
+
+- *Inventory.* ~docker images 'skw/*'~ lists what is built. The recipes are
+  ~/home/skw/tools/skw/dockers/<name>/Dockerfile~, documented in that
+  repository's ~README.org~; the wrappers are in its ~aliases.sh~. To see what an
+  image holds: ~docker run --rm -i --entrypoint sh skw/<name> -c 'ls
+  /usr/local/bin'~.
+- *Canonical form.* ~docker run --rm -i -v "$PWD:/work" -w /work skw/<name>
+  <tool> <args>~, run from the directory you want mounted. ~skw/semgrep~,
+  ~skw/codeql~ and ~skw/recon~ have an entrypoint (~semgrep~, ~codeql~,
+  ~recon.sh~), so their arguments go straight to that program (~--entrypoint~
+  overrides it). The others start ~bash~ by default and take the tool name
+  first. Never add ~-t~ in an agent
+  shell. Add ~:ro~ to the mount for tools that only read.
+- *Ownership.* Every image runs as root unless started with ~-u~, and only the
+  ~skw/codeql~ wrappers pass the host user, so files the other images write are
+  root-owned. The exception is a live capture by ~skw/forensic~, which belongs to
+  the owner of the directory it is written to. Create output directories on the host first: the host user can
+  still rename or delete root-owned files inside a directory it owns, but not
+  clean up directories a container created. Prefer redirecting a tool's stdout
+  on the host side, which produces a host-owned file. ~-u "$(id -u):$(id -g)"~
+  works for ~skw/codeql~ (its wrappers already do this) and for statically linked
+  tools such as ~trufflehog~ (add ~-e HOME=/tmp~). It breaks ~skw/semgrep~ (its
+  Pro token is readable by root only) and the Java images (~/root/tools~ is not
+  readable by other users).
+- *git inside a root container.* Plain ~git~ on a host-owned repository fails
+  with ~detected dubious ownership~. Add ~-e GIT_CONFIG_COUNT=1 -e
+  GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'~, or run as the host
+  user. ~trufflehog git~ works either way. A checkout whose ~.git~ is a *file*
+  (a submodule or worktree) points to a git directory outside the mount, so
+  history is unavailable inside the container.
+- *Identity and pinning.* Every ~skw/*~ image is a local ~:latest~ build with no
+  registry digest. Most recipes also install tools from ~@latest~ or a repository
+  HEAD on floating base tags; only CodeQL (2.27.5), Jazzer (0.30.0) and rp++
+  (2.1.4) are pinned. Identify a run's tools by the image ID and creation time
+  (~docker image inspect --format '{{.Id}} {{.Created}}' skw/<name>~), the recipe
+  revision (~git -C /home/skw/tools/skw/dockers rev-parse HEAD~) and each tool's
+  own ~--version~. Do not rebuild an image during a run. For an official image,
+  record its ~RepoDigests~ entry.
+- *Building.* ~make -C /home/skw/tools/skw/dockers <name>~ builds the image and
+  its base images; it downloads a lot, and ~skw/codeql~, ~skw/pwn~, ~skw/web~ and
+  the Java images are each about 2.5 to 7 GB. ~skw/semgrep~ cannot be built
+  unattended: its build runs ~semgrep login~ and waits for a human to open a URL.
+  Do not run ~make all~, which includes that build.
+- *Never* run ~make clean~ (it runs ~docker system prune -a -f~ and ~docker volume
+  prune -a -f~), or any other ~docker … prune~. They are host-wide and delete
+  every unused image and volume, including the target's databases and the
+  user's other work.
+
+** Image catalogue
+
+Images built on 2026-11-23: ~ad~, ~codeql~, ~forensic~, ~java-env~, ~jazzer~,
+~pwn~, ~recon~, ~semgrep~, ~web~ and the four ~base-*~ images. Not built:
+~http-server~, ~php-env~, ~vsftpd~.
+
+*** skw/semgrep — Semgrep with the Pro engine
+
+Semgrep 1.186.0 on ~python:3.12-slim~, with the Pro engine
+(~semgrep-core-proprietary~) installed and logged in at build time. The token
+is in ~/root/.semgrep/settings.yml~ inside the image. The entrypoint is
+~semgrep~. The image has no ~jq~ and no ~git~.
+
+The command, run from the source root; it works without a terminal:
+
+#+begin_src shell
+docker run --rm -i -v "$PWD:/work" -w /work skw/semgrep scan \
+  --pro --dataflow-traces --max-lines-per-finding=0 --max-target-bytes=5000000 \
+  --time --metrics=off --exclude='sca_*' \
+  --config <pinned ruleset> \
+  --json-output=<out dir>/semgrep.json --sarif-output=<out dir>/semgrep.sarif .
+#+end_src
+
+- ~$PWD~ is mounted at ~/work~ and is the working directory, so give every path
+  relative to it. ~<out dir>~ must be inside the mounted tree (for SCA, under
+  the result directory) and exist before the run. The output files are
+  root-owned.
+- ~--pro~: cross-file and interprocedural analysis. If the Pro engine is not
+  usable on the day, drop ~--pro~, record the substitution, and treat the loss
+  of cross-file dataflow as a coverage gap.
+- ~--dataflow-traces~ adds the source-to-sink trace and
+  ~--max-lines-per-finding=0~ disables snippet truncation, so the
+  machine-readable output gets large. Keep the raw file, but work from a compact
+  index (for example ~jq -r '.results[] | "\(.check_id)\t\(.path):\(.start.line)"'~).
+- ~--max-target-bytes=5000000~ silently skips files above 5 MB (generated
+  bundles, vendored blobs, minified assets). List what was skipped as a coverage
+  gap, and raise the limit for a targeted re-run when a candidate depends on such
+  a file.
+- ~--time~ adds per-rule and per-file timing; use it to find what makes a scan
+  uneconomic, then scope or shard.
+- ~--metrics=off~ keeps usage metrics from being sent to semgrep.dev.
+- ~--exclude='sca_*'~ skips result directories at any depth (verified).
+- Pin the rule configuration: a registry ruleset changes over time, so archive
+  the rules used (or pin a rules repository revision) next to the results. Do
+  not use ~--config auto~, which also refuses to run with ~--metrics=off~.
+- The ~semgrep~ and ~semgrep-pro-scan~ functions mount ~$PWD~ at ~/work~ and work
+  in an agent shell. ~semgrep-pro-scan~ adds ~--pro~, ~--metrics=off~ (left out
+  when you pass your own ~--metrics~ option) and the four other scan flags above,
+  but not the exclusion. ~semgrep-pro-scan --exclude='sca_*' --config <pinned
+  ruleset> --json-output=… --sarif-output=… .~ therefore runs the same scan as
+  the command above (verified).
+- *Rule validation.* Put a rule ~<name>.yaml~ next to a fixture ~<name>.<ext>~.
+  In the fixture, put a ~ruleid: <id>~ comment (in the fixture language's comment
+  syntax) above each line that must match and an ~ok: <id>~ comment above each
+  safe line, then run ~… skw/semgrep scan --test --metrics=off <dir>~ (verified).
+- *The skw-semgrep skill.* Its ~scripts/run-scans.sh~ needs a ~semgrep~
+  *executable* on ~PATH~ and ~jq~ on the host. Give it this wrapper, saved for
+  example as ~<result directory>/artefacts/static/bin/semgrep~ and marked
+  executable. The wrapper mounts the current directory at the same path, so the
+  script's absolute paths resolve. It also adds ~--exclude='sca_*'~ to every
+  scan, because the script excludes only its own output directory:
+
+  #+begin_src shell
+  #!/usr/bin/env bash
+  extra=()
+  for a in "$@"; do case "$a" in --config|--config=*) extra=(--exclude='sca_*'); break;; esac; done
+  exec docker run --rm -i -v "$PWD:$PWD" -w "$PWD" skw/semgrep "$@" "${extra[@]}"
+  #+end_src
+
+  Then, from the analysis root: ~PATH="$PWD/<that bin dir>:$PATH" bash
+  <skill dir>/scripts/run-scans.sh --target "$PWD" --output-dir
+  "$PWD/<result directory>/artefacts/static/semgrep" …~ (verified end to end,
+  with ~--pro~).
+- If ~skw/semgrep~ is missing, use a pinned official image without ~--pro~:
+  ~docker run --rm -i -v "$PWD:/work" -w /work semgrep/semgrep:<version> semgrep
+  scan …~.
+
+*** skw/codeql — CodeQL with build toolchains
+
+The CodeQL 2.27.5 bundle on Debian 13: the CLI, every extractor and the
+precompiled standard query packs, so the stock suites run offline. Query packs
+cover ~actions~ (GitHub Actions workflows), ~cpp~, ~csharp~, ~go~, ~java~ (and
+Kotlin), ~javascript~ (and TypeScript), ~python~, ~ruby~, ~rust~ and ~swift~.
+Build toolchains in the image: Python 3.13, Node 20, Go 1.24 (~GOTOOLCHAIN=auto~
+fetches a newer one when ~go.mod~ asks), OpenJDK 21 with Maven 3.9 (no Gradle),
+gcc 14, clang 19, cmake, ninja and autotools. There is no .NET SDK and no Cargo,
+so C# and Rust databases cannot be built from source here, and Swift needs
+macOS. clang has no sanitizer runtime: ~-fsanitize=address~ and
+~-fsanitize=fuzzer~ fail to link, whereas gcc's ASan works.
+
+The ~codeql~ functions run the container as the host user, allocate a terminal
+only when there is one, and work in agent shells. ~HOME~ is a throwaway
+directory, so a pack downloaded with ~codeql pack download~ is fetched again on
+every run; prefer the bundled packs. Do *not* use ~codeql-scan~ as-is under a
+methodology that confines output: it writes ~codeql-db-<lang>~ and
+~codeql-<lang>.sarif~ into the current directory. Instead, from the source root
+(verified for Python):
+
+#+begin_src shell
+out=<result directory>/artefacts/static
+printf 'paths-ignore:\n  - "sca_*"\n' > "$out/codeql-config.yml"
+codeql database create "$out/codeql-db-python" --language=python --source-root . \
+  --threads=0 --overwrite --codescanning-config="$out/codeql-config.yml"
+codeql database analyze "$out/codeql-db-python" --threads=0 \
+  --format=sarif-latest --sarif-add-snippets --sarif-include-query-help=always \
+  --output="$out/codeql-python.sarif" \
+  -- codeql/python-queries:codeql-suites/python-security-extended.qls
+#+end_src
+
+- The explicit form is ~docker run --rm -i -u "$(id -u):$(id -g)" -v
+  "$PWD:/work" -w /work skw/codeql database create …~.
+- ~paths-ignore~ keeps result directories out of extraction for interpreted
+  languages (Python, JavaScript/TypeScript, Ruby). For compiled languages, check
+  the database's source archive (~src.zip~) for files from the result directory.
+- For compiled languages, ~--build-mode=none~ avoids running the build where
+  the extractor supports it (~codeql database create --help~). A traced build
+  (~--command='<build>'~) writes build output into the tree it runs in, so under
+  a methodology that keeps the target tree unchanged, build a copy placed under
+  the result directory.
+- Suites: ~<lang>-security-extended.qls~ (broader) or
+  ~<lang>-code-scanning.qls~ (higher precision), from ~codeql/<lang>-queries~.
+  The skw-codeql skill documents data extensions and custom suites.
+- ~codeql-findings~ (in the image) turns SARIF into a report ordered by
+  severity. Run it from the scanned directory so it can show source lines:
+  ~codeql-findings --summary <sarif>~ (counts per severity and rule),
+  ~codeql-findings --list -p -s high <sarif>~ (printed report, high and critical
+  only, with every data-flow step), ~--markdown <file>~ / ~--html <file>~ (export). Without a terminal it
+  prints instead of opening fzf.
+- ~codeql-find-databases [roots]~ lists the real databases under the given
+  roots.
+- Licence: the CodeQL CLI is free for open-source code and academic research
+  only; other code needs a GitHub Advanced Security licence. Record which
+  applies.
+
+*** skw/java-env and skw/jazzer — JVM tooling and fuzzing
+
+~skw/java-env~ (Arch Linux) ships OpenJDK 27 (the default) and OpenJDK 8
+(switch with ~archlinux-java set java-8-openjdk~, or call
+~/usr/lib/jvm/java-8-openjdk/bin/java~ directly), Maven 3.10 and Ant (no
+Gradle). Its Java security tools live under ~/root/tools~:
+
+- ~jdeserialize~ decodes a captured Java serialization stream, to show which
+  classes an application really deserializes.
+- ~ysoserial~ (0.0.6-SNAPSHOT) generates serialized objects that exercise
+  known gadget libraries. It fails on the default JDK 27, so its wrapper always
+  runs JDK 8's ~java~ (verified). It writes the object to stdout: ~docker run
+  --rm -i skw/java-env ysoserial <gadget> '<argument>' > <out dir>/<name>.bin~
+  gives a host-owned file.
+- ~marshalsec~ (0.0.3-SNAPSHOT) provides JNDI reference servers (LDAP/RMI) and
+  marshaller payloads. Within a methodology that only proves against your own
+  instance, its servers act as a controlled listener that shows whether a lookup
+  happens.
+
+~skw/jazzer~ adds Jazzer 0.30.0 (~/root/tools/jazzer/jazzer~ and
+~jazzer_standalone.jar~, which also holds the API needed to compile harnesses),
+with ~JAVA_HOME~ set to the default JDK. The bug detectors it loads include
+deserialization, expression-language, LDAP, XPath, SQL, OS-command, script-engine
+and template injection, JNDI lookups (~NamingContextLookup~), SSRF, file path
+traversal, regex injection and reflective calls. A detector firing is a lead
+until reachability from an untrusted entry point is shown. The ~jazzer~
+function (~$PWD~ mounted at ~/work~) works in an agent shell. Compiling a
+harness first needs the image's shell, as in this explicit form (verified):
+
+#+begin_src shell
+docker run --rm -i -v "$PWD:/work" -w /work skw/jazzer bash -c '
+  javac -cp /root/tools/jazzer/jazzer_standalone.jar:<target classpath> \
+        -d <out>/classes <harness>.java &&
+  cd <out>/run &&
+  jazzer --cp=<target classpath>:/work/<out>/classes --target_class=<Harness> \
+         -max_total_time=<seconds>'
+#+end_src
+
+Jazzer writes the crashing input (~crash-<sha1>~) and a Java reproducer
+(~Crash_<sha1>.java~) into its working directory. Both are root-owned, so start
+it in a host-created directory under the result directory. For harness selection
+and longer campaigns, ~/home/skw/tools/skw/claudettes/prompts/FindJazzerTargets.org~
+and ~RunJazzer.org~ hold a dedicated workflow.
+
+*** skw/web — web application testing CLI tools
+
+Alpine image with Chromium (~/usr/bin/chromium~), ~git~, ~curl~, ~jq~,
+~python3~, ~dig~ and ~host~. Tools, all on ~PATH~:
+
+- Content discovery and 40X bypass: ~ffuf~ (2.1.0-dev), ~nomore403~,
+  ~bypass-url-parser~.
+- Injection: ~sqlmap~ (1.10.11-dev), ~sstimap~ (template injection), ~dalfox~
+  (2.13.0, XSS), ~Gxss~ and ~kxss~ (reflection checks), ~qsreplace~, ~gf~ (with
+  tomnomnom's and 1ndianl33t's patterns).
+- Parameters and endpoints: ~arjun~ (hidden parameters), ~jsluice~,
+  ~xnLinkFinder~, ~subjs~, ~sourcemapper~, ~js-beautify~, ~unfurl~, ~uro~,
+  ~anew~.
+- GraphQL: ~clairvoyance~ (schema recovery without introspection), ~batchql~.
+- Tokens, CORS and exposure: ~jwt_tool~, ~corsy~, ~git-dumper~, ~trufflehog~.
+- Detection: ~nuclei~ v3.11.1 with its template set baked in (14,225 files), so
+  it runs offline with ~-duc~.
+- Crawling: ~katana~ (v1.8.0). The default mode parses HTML; ~-headless~ crawls
+  with the bundled Chromium, which also finds URLs that only appear when the
+  page's JavaScript runs (both verified against a local server). Pass ~-duc~ to
+  skip its update check.
+- Internet sources: ~gau~ (2.2.4), ~waymore~ and ~paramspider~ query public web
+  archives; ~subzy~ fingerprints subdomain takeovers.
+
+Invocation:
+
+- The wrappers allocate a terminal only when one exists, so they work in agent
+  shells and in pipes. They mount ~$PWD~ at ~/work~ and use Docker's default
+  bridge network. ~WEB_NETWORK_HOST=1~ switches them to the host network, which
+  is needed to reach a port published on the host's loopback (including Burp's
+  proxy listener). ~nuclei~ has no wrapper: use ~web-run nuclei …~.
+- To reach a Compose stack by service name, join its network: ~docker run --rm
+  -i --network <network> -v "$PWD:/work" -w /work skw/web <tool> …~ (list
+  networks with ~docker network ls~).
+- Proxy options, for routing traffic through an intercepting proxy: ~curl -x
+  <url>~, ~ffuf -x <url>~, ~sqlmap --proxy=<url>~, ~nuclei -proxy <url>~,
+  ~dalfox --proxy <url>~.
+- Write results via host-side stdout redirection where possible; ~-o~ files and
+  any directories a tool creates are root-owned.
+
+Defaults that reach third parties, and the flags that stop them:
+
+- ~trufflehog~ *verifies* candidate secrets against the live services by
+  default. Always pass ~--no-verification~. Git history: ~trufflehog git
+  file:///work --no-verification --json~ (verified). Working tree:
+  ~trufflehog filesystem . --no-verification --json --exclude-paths=<file>~,
+  where the file holds path regexes such as ~^sca_~.
+- ~nuclei~ uses public interactsh servers for out-of-band templates by default.
+  Pass ~-ni~ (~-no-interactsh~), plus ~-duc~ (no update check). Its default rate
+  of 150 requests/s (~-rl~) is far too high for a small local instance.
+- ~gau~, ~waymore~, ~paramspider~ (archives) and ~subzy~ send the target's
+  name to third parties or probe real DNS. They are for engagements that
+  authorize internet-facing reconnaissance, not for a local source review.
+
+*** skw/pwn — native debugging and exploitation support
+
+Arch image with gdb 18.1 (~gdb-pwndbg~ and ~gdb-gef~ start it with each
+plugin), pwntools (with ~checksec~), ~ROPgadget~, ~rp-lin~ (rp++),
+~one_gadget~, ~seccomp-tools~, ~strace~, ~ltrace~, ~file~, ~nasm~, ~rappel~,
+angr, z3 and SageMath, plus ~pwn-init~ (CTF solve templates). gcc 16 builds
+ASan/UBSan binaries (verified); there is no clang.
+
+- gdb turns address-space randomization off for the program it starts with
+  ~personality()~, which Docker's default seccomp profile blocks (~Error
+  disabling address space randomization: Operation not permitted~, and addresses
+  change on every run). ~pwn-run~, ~pwn-runit~ and ~pwn-shell~ therefore add
+  ~--security-opt seccomp=unconfined~, together with ~--network=host~ (verified:
+  ASLR is off under ~pwn-run~).
+- Both options apply to everything in the container, including the binary under
+  test, which then runs without syscall filtering and on the host's network. For
+  a target binary, prefer the explicit form, which keeps Docker's own network:
+  ~docker run --rm -i --security-opt seccomp=unconfined -v "$PWD:/work" -w /work
+  skw/pwn <tool> …~. Add ~--cap-add=SYS_PTRACE~ to attach to a process gdb did
+  not start.
+
+*** skw/forensic — artefacts, archives and packet capture
+
+Arch image with ~tshark~ and ~dumpcap~ (Wireshark CLI), ~binwalk~, ~foremost~,
+~unsquashfs~, libewf (~ewfmount~), ~exiftool~, volatility3 (~vol~, with extra
+Linux symbols under ~/symbols~), python-minidump, ~aesfix~/~aeskeyfind~,
+~bmc-tools.py~, ~angecryption.py~ and ~keepass-dump-masterkey.py~.
+
+To capture a non-HTTP exchange of a containerized service, join the service's
+network namespace. Docker's default capabilities are enough:
+
+#+begin_src shell
+docker run --rm -i --network container:<service container> \
+  -v "$PWD/<out dir>:/out" skw/forensic \
+  tshark -i any -p -a duration:<seconds> -w /out/<name>.pcapng
+#+end_src
+
+- The image's ~dumpcap~, which writes every live capture, runs as the owner of
+  the output directory. A capture into a host-created directory, ring-buffer
+  files (~-b~) included, therefore belongs to the host user, who can read it
+  despite its mode 0600 (verified on ~any~ and ~lo~). A capture to stdout or into
+  a root-owned directory such as ~/tmp~ is still written by root.
+- ~-p~ turns promiscuous mode off, which the ~any~ device does not support
+  anyway; without it tshark prints a warning and captures all the same.
+- Read a capture with ~… skw/forensic tshark -r /out/<name>.pcapng -Y <display
+  filter>~.
+- ~forensic-run~ and ~forensic-runit~ (~$PWD~ at ~/work~) use Docker's default
+  network, where ~eth0~ is the container's own interface. To capture a service,
+  use the explicit form above.
+
+*** skw/recon — internet-facing reconnaissance
+
+Debian image with ~subfinder~, ~assetfinder~, ~alterx~, ~dnsx~, ~puredns~,
+~massdns~, ~httpx~, ~tlsx~, ~gau~ and ~nuclei~ v3.11.1 (templates baked in),
+driven by ~recon.sh~ (entrypoint), ~gimmesubs~, ~http-probe~ and
+~nuclei-auto~. It enumerates subdomains of a real apex domain through passive
+third-party sources and public resolvers, then probes and scans the hosts it
+finds. That is reconnaissance of internet-facing infrastructure. It does not
+belong in a local source review, and it needs a scope that explicitly
+authorizes it.
+
+*** skw/ad — Active Directory tooling
+
+Arch image with Impacket's example scripts, NetExec (~nxc~), Certipy,
+bloodhound-python and bloodhound-ce-python, bloodyAD and autobloody, Coercer,
+DonPAPI, ldeep, krbrelayx (with ~addspn~, ~dnstool~, ~printerbug~),
+PetitPotam, AD-Miner and proxychains-ng. Its wrappers use the host network.
+It is relevant to a source review only when the target integrates with a
+directory you stand up yourself; never point it at a real domain without
+explicit authorization.
+
+*** Other images and wrappers
+
+- ~skw/http-server~ (not built): Python ~uploadserver~ serving ~/work~ on port
+  8000 (uploads at ~/upload~); the ~https-server~ variant uses a self-signed
+  certificate baked into the image at ~/etc/ssl/private/server.pem~. It logs
+  request lines, not headers or bodies. Its wrapper runs it in the foreground on
+  the host network, so run it as ~docker run -d --name <name> --network <network>
+  skw/http-server [port]~ and read ~docker logs <name>~. Without a mount it
+  serves an empty directory. Never mount the analysis root, which would serve
+  the source and the results.
+- ~skw/php-env~ (not built): PHP CLI from Ubuntu's repositories, with
+  ~php-dev~, PEAR, the xml, zip and sqlite3 extensions and libsodium. It has no
+  Composer and no wrapper functions.
+- ~skw/vsftpd~ (not built): an FTP server for a mounted directory.
+- ~skw/base-alpine~, ~skw/base-archlinux~, ~skw/base-debian~,
+  ~skw/base-ubuntu~: base images (bash, curl, git, jq, tmux, …).
+- External images wrapped in ~aliases.sh~: ~unblob~
+  (~ghcr.io/onekey-sec/unblob:latest~, runs as the host user), ~mobsf~ and
+  ~sonarqube~ (the latter publishes on all interfaces). All three use ~:latest~:
+  pin a digest before relying on them.
+
+** Capability map
+
+| Capability                         | Source on this host                                   | Notes |
+|------------------------------------+-------------------------------------------------------+-------|
+| Text search, JSON                  | ~rg~, ~jq~ (host)                                     | ~rg -g '!sca_*'~ skips result directories |
+| SAST, pattern and taint            | ~skw/semgrep~ (Pro)                                   | see above |
+| SAST, deep interprocedural dataflow | ~skw/codeql~                                         | also scans GitHub Actions workflows (~actions~) |
+| Dependency CVEs                    | ~osv-scanner~ (host); trivy or grype as pinned official images | ~osv-scanner scan source -r . --x-exclude 'g:**/sca_*' --format json~; offline: ~--offline-vulnerabilities --download-offline-databases~ |
+| SBOM, image and IaC scanning       | pinned official images (for example ~aquasec/trivy~, ~anchore/syft~) | trivy: ~--skip-dirs 'sca_*'~ |
+| Secrets, history and working tree  | ~trufflehog~ (~skw/web~); gitleaks as a pinned official image | always ~--no-verification~ |
+| CI/CD workflow linting             | CodeQL ~actions~ pack; zizmor or actionlint (pinned official image or scratch install) | no local CI runner (~act~) is installed |
+| Intercepting proxy, HTTP client    | Burp MCP; ~mitmproxy~ and ~curl~ (host)               | see MCP servers |
+| Web testing tools, crawling        | ~skw/web~                                             | ~katana~ crawls headless with Chromium |
+| Browser automation                 | Playwright MCP; Chromium in ~skw/web~                 | |
+| Controlled listener                | ~skw/http-server~ (not built; request lines only); a pinned ~mitmproxy/mitmproxy~ image when full headers and bodies matter | run as a container on the target's network |
+| JVM fuzzing                        | ~skw/jazzer~                                          | |
+| Java serialization                 | ~skw/java-env~                                        | ~ysoserial~ wrapper runs JDK 8 |
+| C/C++ sanitizers                   | gcc ASan/UBSan in ~skw/pwn~ and ~skw/codeql~          | no clang sanitizers, libFuzzer or AFL++ in any ~skw~ image: use a pinned official AFL++ image |
+| Debugging, binary analysis         | ~skw/pwn~; Ghidra MCP                                 | ~pwn-*~ wrappers add host network and ~seccomp=unconfined~ |
+| Packet capture                     | ~tshark~ (~skw/forensic~)                             | default capabilities; the capture belongs to the output directory's owner |
+| Archives, firmware, file carving   | ~skw/forensic~; ~unblob~                              | |
+| PHP runtime                        | ~skw/php-env~ (not built)                             | no Composer |
+
+** Docker networking for a containerized target
+
+- Publish the target's ports on the loopback interface only
+  (~127.0.0.1:<host port>:<container port>~ in Compose), never on all
+  interfaces.
+- A Compose network with ~internal: true~ has no route out, and a container
+  that is only on such a network cannot be reached through a published port
+  either (both verified). To keep the port reachable without giving the
+  application egress, attach only a small reverse-proxy container to both the
+  internal network and a normal one (with the published port), and keep the
+  application and its backing services on the internal network alone. Verify the
+  egress restriction with a negative probe from inside the stack.
+- Tool containers reach services by name when they join the stack's network
+  (~--network <project>_<network>~).
+- Burp's proxy listener (127.0.0.1:8080 by default; confirm it) is on the
+  host's loopback, which bridge-network containers cannot reach. Tools that must
+  go through it run with ~--network host~ (~WEB_NETWORK_HOST=1~ for the
+  ~skw/web~ wrappers) against the loopback-published port.
+- Run controlled listeners (an HTTP logger, a JNDI/LDAP server, an SMTP sink) as
+  named containers on the stack's network, so the target reaches them by name;
+  their logs are the evidence.
+
+** MCP servers
+
+Use these when they are connected; check in preflight, because a configured
+server can still fail to connect on the day.
+
+- *Burp MCP* — the default HTTP/WebSocket instrument.
+  - Route traffic through Burp first, otherwise there is no history to read:
+    point clients at its proxy listener (see the proxy options above) and set
+    ~HTTP_PROXY~ / ~HTTPS_PROXY~ in the application's environment to observe the
+    requests *it* makes outbound (useful for SSRF and webhooks). Set Burp's
+    target scope to the instance under test so the history stays readable.
+  - Read traffic with the proxy-history tools, using their regex variants to
+    search for parameters, headers, tokens or reflected markers. Do the same for
+    the WebSocket history.
+  - Replay and mutate with the request-sending tools. They return the response,
+    so build every automated loop on them: fuzzing a parameter, sweeping an
+    endpoint across roles, replaying with a tampered token, timing a blind
+    injection.
+  - Repeater and Intruder are hand-off tools, not result sources. Creating a
+    Repeater tab or sending a request to Intruder puts it in the Burp UI for a
+    human, and Intruder's results cannot be read back. Never wait on them or treat
+    them as evidence; use them at the end to hand over interesting requests.
+  - Fallbacks when it does not answer: ~mitmproxy~ (host) or ~curl~ with
+    captured requests and responses.
+- *Ghidra MCP* — decompilation and binary analysis.
+- *Playwright MCP* — browser-driven flows: DOM-based XSS, single-page apps,
+  OAuth/OIDC/SAML and WebAuthn ceremonies, anything that needs a real browser.
+
+** Wordlists
+
+Wordlists live in ~/home/skw/tools/skw/wordlists~ (subdirectories ~seclists~,
+~webenum~, ~custom~, ~crackstation~, ~pwdb~, ~hashcat-rules~). Mount them
+read-only into a container: ~-v /home/skw/tools/skw/wordlists:/wordlists:ro~.
+Pick list sizes that suit the target; a large brute-force list against a small
+local instance mostly measures the list.

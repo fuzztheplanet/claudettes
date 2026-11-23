@@ -21,11 +21,11 @@ claudettes/
     `-- ...
 #+end_example
 
-Assuming the collection lives at =~/tools/claudettes=, run this from the root of
-each target project:
+Assuming the collection lives at =~/tools/skw/claudettes=, run this from the
+root of each target project:
 
 #+begin_src bash
-mkdir -p .agents/skills && cp -r ~/tools/claudettes/sec-skills/skw-* .agents/skills/ && ln -sf .agents .claude
+mkdir -p .agents/skills && cp -r ~/tools/skw/claudettes/sec-skills/skw-* .agents/skills/ && ln -sf .agents .claude
 #+end_src
 
 The =skw-*= glob leaves any other project-local skills untouched. Re-running the
@@ -42,5 +42,5 @@ mkdir -p .agents/skills && cp -r ~/tools/skw/claudettes/sec-skills/* .agents/ski
 # Edit target.org to add specific, target-related instructions
 emacs target.org
 # Run the analysis
-claude --permission-mode auto "$(cat ~/tools/claudettes/prompts/SCA.org ~/tools/claudettes/prompts/TOOLING.org ./target.org)"
+claude --permission-mode auto "$(cat ~/tools/skw/claudettes/prompts/SCA.org ~/tools/skw/claudettes/prompts/Tooling.org ./target.org)"
 #+end_src
